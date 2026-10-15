@@ -40,7 +40,8 @@ Test de logica zonder netwerk: `npm test`.
 - **`FEED=pumpportal`:** nieuwe tokens zijn gratis, maar de trade-stream (kopers, volume, ratio) vereist bij PumpPortal een betaalde API-key. Zonder key blijven kopers/vol/ratio op 0.
 - Kopieer `.env.example` naar `.env` om te kiezen. De publieke RPC (`wss://api.mainnet-beta.solana.com`) kan bij veel verkeer afknijpen; een gratis Helius/QuickNode-websocket in `RPC_WSS` is stabieler.
 - Het dashboard toont de feed en het aantal trades per seconde (TRADES). Komen er geen trades binnen, dan verschijnt een waarschuwing.
-- Het event-formaat is gecontroleerd tegen de live mainnet-feed (okt 2026): Trade- en Create-events decoderen correct (timestamp in het event = blocktime, mints eindigen op `pump`). Trades zonder reserves worden overgeslagen. Staat `decodeErr` hoog of blijft de waarschuwing staan, dan is het formaat waarschijnlijk veranderd: meld dat.
+- Het event-formaat is gecontroleerd tegen de live mainnet-feed (okt 2026): Trade- en Create-events decoderen correct (timestamp in het event = blocktime, mints eindigen op `pump`). Trades zonder SOL en zonder reserves (tokenbewegingen, geen markttrades) worden overgeslagen.
+- **Curve-varianten:** ~15% van de nieuwe tokens (CreateV2) start niet op de standaardcurve van 30 SOL maar met eigen reserves (live gezien: 0,4 / 1,7 / 726 SOL). De feed leest de startreserves uit het Create-event, dus startprijs en RUN-filter kloppen ook voor deze tokens. In de dataset staat `vSol0` per token, zodat `analyze.js` ze kan scheiden. De mcap-filter (25–60) sluit ze nu al uit. Staat `decodeErr` hoog of blijft de waarschuwing staan, dan is het formaat waarschijnlijk veranderd: meld dat.
 
 ## Radar-dashboard
 

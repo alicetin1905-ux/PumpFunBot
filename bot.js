@@ -120,7 +120,7 @@ function feats(t) {
 function finalize(t) {
   const c = S.cfg; if (!c.logTokens) return;
   if (t.buyers.size < c.logMinBuyers && !t.traded) { S.logSkipped++; return; }
-  const rec = { id: t.m, sym: t.sym, t0: t.t0, devBuy: r2(t.devBuy), step: STEP_MS / 1000, snaps: t.snaps, path: t.path,
+  const rec = { id: t.m, sym: t.sym, t0: t.t0, vSol0: r2(t.v0 || 0), devBuy: r2(t.devBuy), step: STEP_MS / 1000, snaps: t.snaps, path: t.path,
     peak: r1(t.peak), peakAge: r1(t.peakAge || 0), devSoldAt: t.devSoldAt, final: feats(t), trade: t.trade || null };
   tokenBuf.push({ day: new Date(t.t0).toISOString().slice(0, 10), line: JSON.stringify(rec) });
   S.logSaved++; save();
@@ -152,7 +152,7 @@ const unsub = m => { if (FEED === 'pumpportal') send({ method: 'unsubscribeToken
 const price = d => (d.vSolInBondingCurve && d.vTokensInBondingCurve) ? d.vSolInBondingCurve / d.vTokensInBondingCurve : null;
 
 function newTok(m, sym, creator, p, mcap, vSol, vTok, t0, devBuy) {
-  return { m, sym, t0, creator, p0: p, p, vSol, vTok, mcap, peak: mcap, peakAge: 0, buyers: new Set(), sellers: new Set(), buyBy: new Map(),
+  return { m, sym, t0, creator, p0: p, p, vSol, vTok, v0: vSol, mcap, peak: mcap, peakAge: 0, buyers: new Set(), sellers: new Set(), buyBy: new Map(),
     recent: [], buyVol: 0, sellVol: 0, nTrades: 0, nBuys: 0, nSells: 0, devSold: false, devSoldAt: null, devBuy: devBuy || 0,
     last: Date.now(), path: [], snaps: [], snapIdx: 0, traded: false, pendingBuy: false, trade: null };
 }

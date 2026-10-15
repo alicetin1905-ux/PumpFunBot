@@ -11,7 +11,9 @@
    Event-indeling (Anchor; de eerste velden zijn stabiel, nieuwere versies voegen er achteraan velden aan toe):
      TradeEvent : disc(8) mint(32) sol_amount(u64) token_amount(u64) is_buy(u8) user(32) timestamp(i64)
                   virtual_sol_reserves(u64) virtual_token_reserves(u64) real_sol_reserves(u64) real_token_reserves(u64) …
-     CreateEvent: disc(8) name(str) symbol(str) uri(str) mint(32) bonding_curve(32) user(32) …
+     CreateEvent: disc(8) name(str) symbol(str) uri(str) mint(32) bonding_curve(32) user(32)
+                  creator(32) timestamp(i64) virtual_token_reserves(u64) virtual_sol_reserves(u64) real_token_reserves(u64) token_supply(u64) …
+                  (CreateV2-tokens kunnen met andere startreserves beginnen dan 30 SOL; live gezien van 0,01 tot 700+ SOL)
    De discriminators zijn sha256("event:<Naam>")[0..8] (Anchor-standaard). */
 const crypto = require('crypto');
 const WebSocket = require('ws');
@@ -57,7 +59,7 @@ function decodeEvent(buf, ctx) {
     const isBuy = buf[56];
     if (isBuy > 1) throw new Error('is_buy ongeldig');
     const sol = u64(buf, 40), tok = u64(buf, 48), vSol = u64(buf, 97), vTok = u64(buf, 105);
-    // Live gezien: een klein deel van de trades heeft virtual_sol_reserves = 0 (geen bruikbare prijs). Overslaan, geen formaatfout.
+    // Live gezien: trades met sol_amount = 0 en virtual_sol_reserves = 0 (tokenbeweging zonder SOL, geen markttrade). Overslaan, geen formaatfout.
     if (!(vSol > 0 && vTok > 0)) return null;
     const vSolH = vSol / 1e9, vTokH = vTok / 1e6;
     return { txType: isBuy ? 'buy' : 'sell', mint, solAmount: sol / 1e9, tokenAmount: tok / 1e6,
@@ -71,9 +73,15 @@ function decodeEvent(buf, ctx) {
     const mintBuf = buf.subarray(o, o + 32), user = buf.subarray(o + 64, o + 96).toString('hex');
     const mint = b58encode(mintBuf);
     ctx.hexToMint.set(mintBuf.toString('hex'), mint);
-    // Beginstand van elke pump.fun-curve: 30 SOL / 1.073B tokens (de eerste koop van de dev corrigeert dit direct).
-    return { txType: 'create', mint, symbol, name, traderPublicKey: user, solAmount: 0,
-      vSolInBondingCurve: 30, vTokensInBondingCurve: 1073000000, marketCapSol: 30 / 1073000000 * 1e9 };
+    // Startreserves van de curve staan in het event zelf. Standaard: 30 SOL / 1.073B tokens; valt terug daarop als het event korter is.
+    let vSolH = 30, vTokH = 1073000000, custom = false;
+    const t = o + 96 + 32 + 8; // na user, creator, timestamp
+    if (t + 16 <= buf.length) {
+      const vt = u64(buf, t), vs = u64(buf, t + 8);
+      if (vt > 0 && vs > 0) { vTokH = vt / 1e6; vSolH = vs / 1e9; custom = Math.abs(vSolH - 30) > 0.5 || Math.abs(vTokH - 1073000000) > 1; }
+    }
+    return { txType: 'create', mint, symbol, name, traderPublicKey: user, solAmount: 0, customCurve: custom,
+      vSolInBondingCurve: vSolH, vTokensInBondingCurve: vTokH, marketCapSol: vSolH / vTokH * 1e9 };
   }
   return null;
 }
@@ -91,7 +99,7 @@ function decodeLogs(logs, ctx, onError) {
 
 function start({ url, onMessage, onStatus, log }) {
   const ctx = { hexToMint: new Map() };
-  const stats = { msgs: 0, trades: 0, creates: 0, decodeErrors: 0, lastEventAt: 0 };
+  const stats = { msgs: 0, trades: 0, creates: 0, customCurves: 0, decodeErrors: 0, lastEventAt: 0 };
   let ws = null, backoff = 1000, stopped = false, lastData = Date.now(), wd = null;
 
   const open = () => {
@@ -110,7 +118,7 @@ function start({ url, onMessage, onStatus, log }) {
       const v = j.params && j.params.result && j.params.result.value;
       if (!v || v.err || !Array.isArray(v.logs)) return;
       for (const m of decodeLogs(v.logs, ctx, () => { stats.decodeErrors++; })) {
-        if (m.txType === 'create') stats.creates++; else stats.trades++;
+        if (m.txType === 'create') { stats.creates++; if (m.customCurve) stats.customCurves++; } else stats.trades++;
         stats.lastEventAt = Date.now();
         try { onMessage(m); } catch (e) { log('fout in handler: ' + e.message); }
       }

@@ -27,6 +27,17 @@ assert.strictEqual(msgs[0].txType, 'create'); assert.strictEqual(msgs[0].mint, F
 const m = F.decodeLogs(logs(trade(1, w(), 0.5, 31.5, 1.0e9)), ctx, e => errs.push(e))[0];
 assert.strictEqual(m.txType, 'buy'); assert.ok(Math.abs(m.solAmount - 0.5) < 1e-9); assert.ok(Math.abs(m.marketCapSol - 31.5) < 1e-6);
 assert.strictEqual(F.decodeLogs(logs(trade(0, w(), 0.5, 31, 1.0e9)), ctx)[0].txType, 'sell');
+// CreateEvent met eigen startreserves (CreateV2): worden uit het event gelezen, niet als 30 SOL aangenomen
+{
+  const u = n => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
+  const tail = (vTok, vSol) => Buffer.concat([w(), Buffer.alloc(8), u(vTok), u(vSol), u(793100000000000), u(1000000000000000), Buffer.alloc(40)]);
+  const mk = tl => Buffer.concat([F.CREATE, str('N'), str('S'), str('u'), w(), w(), w(), tl]);
+  const c1 = F.decodeLogs(logs(mk(tail('1073000000000000', 30e9))), { hexToMint: new Map() })[0];
+  assert.strictEqual(c1.customCurve, false); assert.strictEqual(c1.vSolInBondingCurve, 30);
+  const c2 = F.decodeLogs(logs(mk(tail('1073000000000000', 40864876))), { hexToMint: new Map() })[0];
+  assert.strictEqual(c2.customCurve, true); assert.ok(Math.abs(c2.vSolInBondingCurve - 0.040864876) < 1e-12);
+  assert.ok(Math.abs(c2.marketCapSol - 0.040864876 / 1073000000 * 1e9) < 1e-9);
+}
 // trade zonder reserves (live gezien): geen bericht en geen decodeerfout
 const errs0 = errs.length;
 assert.strictEqual(F.decodeLogs(logs(trade(1, w(), 0.5, 0, 0)), ctx, e => errs.push(e)).length, 0);
