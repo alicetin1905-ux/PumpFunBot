@@ -108,7 +108,8 @@ details summary::-webkit-details-marker{display:none}
 <header>
  <div class="radar" id="radar"></div>
  <div class="logo orb">FLINT</div>
- <div class="status"><span id="conn">VERBINDEN…</span><span>UPTIME <b id="up">–</b> · GEVOLGD <b id="trk">0</b> · KLAAR <b id="rdy" class="g">0</b> · DATA <b id="dat">–</b> · MISLUKT <b id="fl">0</b></span></div>
+ <div class="status"><span id="conn">VERBINDEN…</span><span>UPTIME <b id="up">–</b> · GEVOLGD <b id="trk">0</b> · KLAAR <b id="rdy" class="g">0</b> · DATA <b id="dat">–</b> · MISLUKT <b id="fl">0</b> · TRADES <b id="tps">–</b></span></div>
+ <div class="pill warn" id="fw" style="display:none;max-width:420px;white-space:normal"></div>
  <div class="spacer"></div>
  <span class="pill" id="blk" style="display:none"></span>
  <span class="pill demo" id="demo" style="display:none">DEMO</span>
@@ -212,6 +213,7 @@ function draw(s){
  const up=(Date.now()-s.startedAt)/36e5;$('up').textContent=up<48?f(up,1)+' u':f(up/24,1)+' d';
  $('trk').textContent=s.trackedTotal;$('rdy').textContent=s.readyCount;
  $('dat').textContent=s.data.on?`${s.data.saved} tokens · ${(s.data.bytes/1e6).toFixed(1)} MB`:'uit';$('fl').textContent=s.failed;
+ if(s.feed){$('tps').textContent=s.feed.kind.toUpperCase()+' '+s.feed.tps+'/s';const w=$('fw');w.style.display=s.feed.warn?'':'none';w.textContent='⚠ '+s.feed.warn;}
  const b=$('blk');b.style.display=s.blocked?'':'none';b.textContent='⚠ '+(s.blocked||'');b.className='pill'+(s.blocked?' warn':'');
  $('demo').style.display=s.demo?'':'none';
  const st=s.stats;

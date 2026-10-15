@@ -12,6 +12,16 @@
 const fs = require('fs'), path = require('path'), http = require('http');
 const WebSocket = require('ws');
 
+// Optioneel .env (KEY=waarde per regel); echte omgevingsvariabelen gaan voor.
+try {
+  for (const l of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split('\n')) {
+    const m = l.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/); if (!m || l.trim().startsWith('#')) continue;
+    if (process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  }
+} catch { /* geen .env */ }
+const FEED = (process.env.FEED || 'solana').toLowerCase();   // 'solana' (gratis, on-chain) of 'pumpportal' (trades vereisen betaalde key)
+const RPC_WSS = process.env.RPC_WSS || 'wss://api.mainnet-beta.solana.com';
+
 const PORT = +process.env.PORT || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
@@ -37,6 +47,7 @@ const fresh = () => ({
 let S = fresh();
 const T = new Map();
 const LOGS = [];
+let solFeed = null, feedStart = 0, lastTradeAt = 0, nFeedTrades = 0, tradeTimes = [];
 let dirty = false, ws = null, connected = false, backoff = 1000, lastMsg = Date.now(), nPending = 0, dataBytes = 0;
 const tokenBuf = [], tradeBuf = [];
 
@@ -136,8 +147,8 @@ const schedule = (fn, ms) => {
 
 /* ---------- feed ---------- */
 const send = o => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(o)); };
-const sub = m => send({ method: 'subscribeTokenTrade', keys: [m] });
-const unsub = m => send({ method: 'unsubscribeTokenTrade', keys: [m] });
+const sub = m => { if (FEED === 'pumpportal') send({ method: 'subscribeTokenTrade', keys: [m] }); };
+const unsub = m => { if (FEED === 'pumpportal') send({ method: 'unsubscribeTokenTrade', keys: [m] }); };
 const price = d => (d.vSolInBondingCurve && d.vTokensInBondingCurve) ? d.vSolInBondingCurve / d.vTokensInBondingCurve : null;
 
 function newTok(m, sym, creator, p, mcap, vSol, vTok, t0, devBuy) {
@@ -146,8 +157,21 @@ function newTok(m, sym, creator, p, mcap, vSol, vTok, t0, devBuy) {
     last: Date.now(), path: [], snaps: [], snapIdx: 0, traded: false, pendingBuy: false, trade: null };
 }
 
+function connectSolana() {
+  // Open posities moeten ook na een herstart gevolgd worden; de Solana-feed kent alleen tokens die hij zelf ziet,
+  // dus die worden bij het eerstvolgende trade-event niet herkend: ze sluiten via de stale-timeout.
+  for (const [m, p] of Object.entries(S.pos)) if (!T.has(m)) T.set(m, newTok(m, p.sym, p.creator, p.last, p.entryMcap || 0, p.vSol, p.vTok, p.t0, 0));
+  feedStart = Date.now(); lastMsg = Date.now();
+  solFeed = require('./feed-solana.js').start({
+    url: RPC_WSS, log,
+    onStatus: ok => { connected = ok; if (ok) lastMsg = Date.now(); },
+    onMessage: m => { lastMsg = Date.now(); try { handle(m); } catch (e) { log('fout in handle: ' + e.message); } }
+  });
+}
+
 function connect() {
-  ws = new WebSocket('wss://pumpportal.fun/api/data');
+  if (FEED !== 'pumpportal') return connectSolana();
+  ws = new WebSocket('wss://pumpportal.fun/api/data' + (process.env.PUMPPORTAL_API_KEY ? '?api-key=' + encodeURIComponent(process.env.PUMPPORTAL_API_KEY) : ''));
   ws.on('open', () => {
     connected = true; backoff = 1000; lastMsg = Date.now();
     send({ method: 'subscribeNewToken' });
@@ -191,7 +215,10 @@ function handle(d) {
   if (t.mcap > t.peak) { t.peak = t.mcap; t.peakAge = (now - t.t0) / 1000; }
   t.last = now; t.nTrades++;
   const sol = d.solAmount || 0, who = d.traderPublicKey;
-  if (d.txType === 'buy') {
+  if (d.txType === 'buy' || d.txType === 'sell') { lastTradeAt = now; nFeedTrades++; tradeTimes.push(now); }
+  if (d.txType === 'buy' && who === t.creator && now - t.t0 < 3000) {
+    t.devBuy += sol; // eerste koop van de maker in dezelfde transactie: geen onafhankelijke koper
+  } else if (d.txType === 'buy') {
     t.nBuys++; t.buyVol += sol; t.buyers.add(who); t.buyBy.set(who, (t.buyBy.get(who) || 0) + sol);
     t.recent.push({ ts: now, sol, b: 1 });
   } else if (d.txType === 'sell') {
@@ -313,7 +340,11 @@ function tick() {
     }
     if (!S.pos[m] && !t.pendingBuy && age > hor) { finalize(t); T.delete(m); unsub(m); }
   }
-  if (connected && now - lastMsg > 60000) { log('feed stil, herverbinden'); try { ws.terminate(); } catch { /* */ } }
+  while (tradeTimes.length && now - tradeTimes[0] > 60000) tradeTimes.shift();
+  if (connected && now - lastMsg > 60000) {
+    log('feed stil, herverbinden');
+    if (solFeed) solFeed.restart(); else try { ws.terminate(); } catch { /* */ }
+  }
 }
 
 /* ---------- statistieken + API ---------- */
@@ -337,7 +368,17 @@ function radar() {
   rows.sort((a, b) => (a.dead - b.dead) || (b.passed - a.passed) || (a.age - b.age));
   return { tokens: rows.slice(0, 60), funnel, trackedTotal: rows.length, readyCount: rows.filter(r => r.ready).length };
 }
+function feedInfo() {
+  const now = Date.now(), noTrades = !process.env.DEMO && connected && T.size >= 3 && now - feedStart > 25000 && now - lastTradeAt > 30000;
+  const warn = noTrades ? (FEED === 'pumpportal'
+      ? 'Geen trade-data ontvangen. PumpPortal levert trades alleen met een betaalde API-key (PUMPPORTAL_API_KEY in .env) — of zet FEED=solana.'
+      : 'Geen trade-data ontvangen via de Solana-feed. Gebruik een betere RPC_WSS in .env (bijv. een gratis Helius/QuickNode-endpoint).')
+    : '';
+  return { kind: process.env.DEMO ? 'demo' : FEED, tps: r1(tradeTimes.length / 60), trades: nFeedTrades, warn,
+    decodeErr: solFeed ? solFeed.stats.decodeErrors : 0 };
+}
 const state = () => ({
+  feed: feedInfo(),
   connected, running: S.running, bal: S.bal, fees: S.fees, stats: stats(), cfg: S.cfg, def: DEF,
   startedAt: S.startedAt, tracked: T.size, dayPnl: S.dayPnl, blocked: blocker(), demo: !!process.env.DEMO,
   failed: S.failed, data: { on: !!S.cfg.logTokens, saved: S.logSaved, skipped: S.logSkipped, bytes: dataBytes },

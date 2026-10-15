@@ -1,6 +1,6 @@
 # FLINT — pump.fun paper bot
 
-Paper trading bot voor pump.fun op de live PumpPortal-feed, met virtueel geld (start: 5 SOL).
+Paper trading bot voor pump.fun op een live feed (standaard gratis, rechtstreeks van Solana), met virtueel geld (start: 5 SOL).
 Geen wallet, geen keys, geen echt geld.
 
 Twee versies:
@@ -33,6 +33,14 @@ Let op: een MacBook met gesloten deksel gaat toch slapen. Laat hem open op de la
 Zonder internet of tijdens slaap ziet de bot geen prijzen; open posities worden dan na de stale-timeout gesloten.
 
 Test de logica zonder netwerk: `npm test`.
+
+## Feed
+
+- **`FEED=solana` (standaard, gratis):** de bot leest pump.fun-transacties rechtstreeks van de blockchain via een Solana RPC-websocket (`logsSubscribe`) en decodeert de Create- en Trade-events. Geen account of key nodig.
+- **`FEED=pumpportal`:** nieuwe tokens zijn gratis, maar de trade-stream (kopers, volume, ratio) vereist bij PumpPortal een betaalde API-key. Zonder key blijven kopers/vol/ratio op 0.
+- Kopieer `.env.example` naar `.env` om te kiezen. De publieke RPC (`wss://api.mainnet-beta.solana.com`) kan bij veel verkeer afknijpen; een gratis Helius/QuickNode-websocket in `RPC_WSS` is stabieler.
+- Het dashboard toont de feed en het aantal trades per seconde (TRADES). Komen er geen trades binnen, dan verschijnt een waarschuwing.
+- Het event-formaat is nagebouwd uit de programma-structuur en kon niet tegen de live chain getest worden in de ontwikkelomgeving. Staat `decodeErr` hoog of blijft de waarschuwing staan, meld dat.
 
 ## Radar-dashboard
 
