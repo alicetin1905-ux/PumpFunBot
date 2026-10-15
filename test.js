@@ -44,6 +44,45 @@ function heat(mint, tag, n = 6) { for (let i = 0; i < n; i++) buy(mint, tag + i,
   B.close('FEE', 'handmatig');
   assert(!S.pos.FEE && S.hist[0].why === 'handmatig');
 
+  // 2c) Wallet-/bundelsignalen: snipers (zelfde slot), maker-geschiedenis, slimme wallets, opslaan/laden
+  {
+    const H = (mint, tx, who, sol, vSol, slot) => B.handle({ txType: tx, mint, traderPublicKey: who, solAmount: sol, vSolInBondingCurve: vSol, vTokensInBondingCurve: 1e9, marketCapSol: vSol, slot });
+    const create = (mint, dev, slot) => { B.handle({ txType: 'create', mint, symbol: mint, traderPublicKey: dev, solAmount: 0, vSolInBondingCurve: 30, vTokensInBondingCurve: 1e9, marketCapSol: 30, slot }); B.T.get(mint).t0 -= 10000; };
+    // snipers: 4 kopers in slot+1, 2 later → aandeel volgt volume
+    C.maxSniperShare = 50; C.minOrganic = 3; // filters aan vóór de kopen, zodat dit token geen positie opent
+    create('SNP', 'devS', 1000);
+    for (let i = 0; i < 4; i++) H('SNP', 'buy', 'sn' + i, 0.5, 30.1 + i / 10, 1001);
+    for (let i = 0; i < 2; i++) H('SNP', 'buy', 'og' + i, 0.5, 31 + i / 10, 1010);
+    const sn = B.T.get('SNP'); assert(!S.pos.SNP, 'sniper-token wordt niet gekocht');
+    assert.strictEqual(sn.snipers.size, 4, 'snipers geteld op slot-verschil');
+    const ev = B.evaluate(sn).checks;
+    assert(ev.find(x => x.k === 'snipe') && !ev.find(x => x.k === 'snipe').ok, 'sniper-filter moet falen bij 67% sniper-volume');
+    assert(!ev.find(x => x.k === 'organic').ok, 'organisch-filter moet falen bij 2 organische kopers');
+    C.maxSniperShare = 100; C.minOrganic = 0;
+    assert.strictEqual(B.evaluate(sn).checks.length, 7, 'optionele filters staan standaard uit');
+    // zonder slot-data (andere feed) geen sniper-telling
+    create('NOSLOT', 'devN'); H('NOSLOT', 'buy', 'z1', 0.5, 30.2); assert.strictEqual(B.T.get('NOSLOT').snipers.size, 0);
+
+    // maker: eerste token dumpt de dev → tweede token van dezelfde maker draagt dat in zijn kenmerken
+    create('RUG1', 'devR', 2000); H('RUG1', 'buy', 'q1', 0.5, 30.5, 2005); H('RUG1', 'sell', 'devR', 0.5, 29, 2006);
+    assert(B.T.get('RUG1').devSold); B.finalize(B.T.get('RUG1'));
+    create('RUG2', 'devR', 3000);
+    assert.strictEqual(B.T.get('RUG2').devN, 1); assert.strictEqual(B.T.get('RUG2').devRugs, 1);
+    C.maxDevRugs = 0; assert(!B.evaluate(B.T.get('RUG2')).checks.find(x => x.k === 'devhist').ok, 'maker met eerdere rug wordt geweigerd'); C.maxDevRugs = 99;
+
+    // slimme wallet: 3x vroeg in een token dat verdubbelt → slim
+    for (let i = 0; i < 3; i++) { const m = 'WINW' + i; create(m, 'devW' + i, 4000 + i); H(m, 'buy', 'smartW0', 0.5, 31, 4005 + i); H(m, 'buy', 'mid', 0.5, 70, 4020 + i); B.finalize(B.T.get(m)); }
+    assert(B.isSmart('smartW0'), 'wallet met 3/3 winnaars is slim');
+    for (let i = 0; i < 3; i++) { const m = 'FLAT' + i; create(m, 'devF' + i, 4100 + i); H(m, 'buy', 'loserW', 0.5, 31, 4105 + i); H(m, 'buy', 'x' + i, 0.5, 33, 4120 + i); B.finalize(B.T.get(m)); }
+    assert(!B.isSmart('loserW'), 'wallet die 3x vroeg in niet-verdubbelende tokens zat is niet slim');
+    create('SM4', 'devSM', 5000); H('SM4', 'buy', 'smartW0', 0.5, 30.5, 5010);
+    C.minSmart = 1; assert(B.evaluate(B.T.get('SM4')).checks.find(x => x.k === 'smart').ok, 'slim-filter ziet de slimme wallet'); C.minSmart = 0;
+
+    // register overleeft herstart
+    B.saveRegistry(); const nW = B.REG.wallets.size; B.REG.wallets.clear(); B.REG.creators.clear(); B.loadRegistry();
+    assert.strictEqual(B.REG.wallets.size, nW); assert(B.isSmart('smartW0'));
+  }
+
   // 3) Dev verkoopt -> geen instap; te weinig kopers -> geen instap
   mk('RUG', 'devC');
   B.handle({ txType: 'sell', mint: 'RUG', traderPublicKey: 'devC', solAmount: 1, vSolInBondingCurve: 29, vTokensInBondingCurve: 1e9, marketCapSol: 30 });
@@ -93,7 +132,7 @@ function heat(mint, tag, n = 6) { for (let i = 0; i < n; i++) buy(mint, tag + i,
 
   // 8) Boekhouding klopt: balans = start + som pnl - verloren fees van mislukte orders
   const sum = S.hist.reduce((a, x) => a + x.pnl, 0);
-  assert(Object.keys(S.pos).length === 0);
+  assert(Object.keys(S.pos).length === 0, "open: " + Object.keys(S.pos));
   assert(Math.abs(S.bal - (5 + sum - S.failed * C.prio)) < 1e-9, `balans ${S.bal} vs verwacht ${5 + sum - S.failed * C.prio}`);
 
   // 9) analyze.js draait zonder crash (met weinig data: nette melding)

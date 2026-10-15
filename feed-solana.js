@@ -125,7 +125,9 @@ function start({ url, onMessage, onStatus, log }) {
       stats.msgs++;
       const v = j.params && j.params.result && j.params.result.value;
       if (!v || v.err || !Array.isArray(v.logs)) return;
+      const slot = j.params.result.context && j.params.result.context.slot;
       for (const m of decodeLogs(v.logs, ctx, () => { stats.decodeErrors++; })) {
+        m.slot = slot; m.sig = v.signature; // slot ≈ 0,4 s: nodig om snipers/bundels (zelfde slot als de creatie) te herkennen
         if (m.txType === 'create') { stats.creates++; if (m.customCurve) stats.customCurves++; } else stats.trades++;
         stats.lastEventAt = Date.now();
         try { onMessage(m); } catch (e) { log('fout in handler: ' + e.message); }

@@ -37,7 +37,9 @@ const DEF = {
   tp: 12, sl: 8, trailStart: 8, trail: 5, maxHold: 90, stale: 25,
   feePct: 1.25, slip: 1, prio: 0.0008, dailyLoss: 0.8,
   latMin: 300, latMax: 900, failBuy: 8, failSell: 5, staleHaircut: 15,
-  logTokens: 1, logMinBuyers: 3, logHorizon: 180, keepDays: 10
+  logTokens: 1, logMinBuyers: 3, logHorizon: 180, keepDays: 10,
+  // Optionele filters op wallet-/bundelsignalen (uit = 100 / 0 / 99 / 0); zie README
+  maxSniperShare: 100, minOrganic: 0, maxDevRugs: 99, minSmart: 0
 };
 
 const fresh = () => ({
@@ -75,6 +77,46 @@ function flush() {
   fs.renameSync(tmp, STATE_FILE);
 }
 
+/* ---------- wallet- en makerregister ----------
+   Leert uit de afgeronde tokens (alleen verleden, dus geen vooruitkijken):
+   - maker: hoeveel tokens eerder gelanceerd en hoeveel daarvan de maker zelf dumpte (devRugs)
+   - wallet: vroege kopers (eerste 30 s) van tokens die later minstens verdubbelden ("slimme wallets") */
+const WALLET_FILE = path.join(DATA_DIR, 'wallets.json');
+const SNIPE_SLOTS = 2;                                     // kopen binnen 2 slots (~1 s) na de creatie = sniper/bundel
+const WIN_MULT = 2, SMART_MIN_N = 3, SMART_MIN_RATE = 0.34;  // token "wint" bij 2x mcap; slim = ≥3 vroege plekken en ≥34% winnaars
+const EARLY_SECS = 30, EARLY_MAX = 20, CAP_CREATORS = 50000, CAP_WALLETS = 150000;
+const REG = { creators: new Map(), wallets: new Map() };   // id → [aantal, rugs|winnaars, laatst gezien]
+let regDirty = false;
+const wid = k => String(k || '').slice(0, 12);
+const isSmart = w => { const r = REG.wallets.get(wid(w)); return !!r && r[0] >= SMART_MIN_N && r[1] / r[0] >= SMART_MIN_RATE; };
+function registryUpdate(t) {
+  if (t.regDone) return; t.regDone = true;
+  const now = Date.now(), win = t.m0 > 0 && t.peak >= t.m0 * WIN_MULT;
+  const cr = REG.creators.get(wid(t.creator)); if (cr && t.devSold) { cr[1]++; cr[2] = now; }
+  for (const w of t.early) {
+    const k = wid(w), r = REG.wallets.get(k) || [0, 0, 0];
+    r[0]++; if (win) r[1]++; r[2] = now; REG.wallets.set(k, r);
+  }
+  regDirty = true;
+}
+function loadRegistry() {
+  try {
+    const j = JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'));
+    for (const [k, ...v] of j.c || []) REG.creators.set(k, v); for (const [k, ...v] of j.w || []) REG.wallets.set(k, v);
+  } catch { /* eerste start */ }
+}
+function saveRegistry() {
+  if (!regDirty) return; regDirty = false;
+  const trim = (m, cap) => { if (m.size > cap) for (const [k] of [...m].sort((a, b) => a[1][2] - b[1][2]).slice(0, m.size - Math.floor(cap * 0.8))) m.delete(k); };
+  trim(REG.creators, CAP_CREATORS); trim(REG.wallets, CAP_WALLETS);
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmp = WALLET_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ c: [...REG.creators].map(([k, v]) => [k, ...v]), w: [...REG.wallets].map(([k, v]) => [k, ...v]) }));
+    fs.renameSync(tmp, WALLET_FILE);
+  } catch (e) { log('register schrijven mislukt: ' + e.message); }
+}
+
 /* ---------- datalogging ---------- */
 function flushData() {
   if (!tokenBuf.length && !tradeBuf.length) return;
@@ -110,14 +152,18 @@ function feats(t) {
   const now = Date.now(); let b10 = 0, s10 = 0;
   for (const x of t.recent) if (now - x.ts <= 10000) { if (x.b) b10 += x.sol; else s10 += x.sol; }
   let top = 0; for (const v of t.buyBy.values()) if (v > top) top = v;
+  let smart = 0; for (const b of t.buyers) if (isSmart(b)) smart++;
   return {
     age: r1((now - t.t0) / 1000), buyers: t.buyers.size, sellers: t.sellers.size, buyVol: r2(t.buyVol), sellVol: r2(t.sellVol),
     nBuys: t.nBuys, nSells: t.nSells, ratio: r2(Math.min(99, t.buyVol / (t.sellVol + 0.01))), mcap: r1(t.mcap),
     run: r1((t.p / t.p0 - 1) * 100), devSold: t.devSold ? 1 : 0, devBuy: r2(t.devBuy),
-    topShare: t.buyVol ? r2(top / t.buyVol) : 0, buys10: r2(b10), sells10: r2(s10), mom: r2(b10 - s10)
+    topShare: t.buyVol ? r2(top / t.buyVol) : 0, buys10: r2(b10), sells10: r2(s10), mom: r2(b10 - s10),
+    snipers: t.snipers.size, sniperShare: t.buyVol ? r2(t.sniperVol / t.buyVol) : 0, organic: t.buyers.size - t.snipers.size,
+    devN: t.devN, devRugs: t.devRugs, smart
   };
 }
 function finalize(t) {
+  registryUpdate(t);
   const c = S.cfg; if (!c.logTokens) return;
   if (t.buyers.size < c.logMinBuyers && !t.traded) { S.logSkipped++; return; }
   const rec = { id: t.m, sym: t.sym, t0: t.t0, vSol0: r2(t.v0 || 0), devBuy: r2(t.devBuy), step: STEP_MS / 1000, snaps: t.snaps, path: t.path,
@@ -154,7 +200,8 @@ const price = d => (d.vSolInBondingCurve && d.vTokensInBondingCurve) ? d.vSolInB
 function newTok(m, sym, creator, p, mcap, vSol, vTok, t0, devBuy) {
   return { m, sym, t0, creator, p0: p, p, vSol, vTok, v0: vSol, feePct: null, mcap, peak: mcap, peakAge: 0, buyers: new Set(), sellers: new Set(), buyBy: new Map(),
     recent: [], buyVol: 0, sellVol: 0, nTrades: 0, nBuys: 0, nSells: 0, devSold: false, devSoldAt: null, devBuy: devBuy || 0,
-    last: Date.now(), path: [], snaps: [], snapIdx: 0, traded: false, pendingBuy: false, trade: null };
+    last: Date.now(), path: [], snaps: [], snapIdx: 0, traded: false, pendingBuy: false, trade: null,
+    m0: mcap, slot0: null, snipers: new Set(), sniperVol: 0, early: new Set(), devN: 0, devRugs: 0, regDone: false };
 }
 
 function connectSolana() {
@@ -205,7 +252,11 @@ function handle(d) {
     if (T.size >= MAX_TRACKED) evictOldest();
     // Tokennamen zijn door gebruikers gekozen en dus onbetrouwbaar: alleen veilige tekens, kort.
     const sym = String(d.symbol || '').replace(/[^\p{L}\p{N}$._-]/gu, '').slice(0, 14) || String(d.mint).slice(0, 5);
-    T.set(d.mint, newTok(d.mint, sym, d.traderPublicKey, p, d.marketCapSol || 0, d.vSolInBondingCurve, d.vTokensInBondingCurve, Date.now(), d.solAmount));
+    const t = newTok(d.mint, sym, d.traderPublicKey, p, d.marketCapSol || 0, d.vSolInBondingCurve, d.vTokensInBondingCurve, Date.now(), d.solAmount);
+    const ck = wid(d.traderPublicKey), cr = REG.creators.get(ck) || [0, 0, 0];
+    t.slot0 = d.slot != null ? d.slot : null; t.devN = cr[0]; t.devRugs = cr[1];
+    REG.creators.set(ck, [cr[0] + 1, cr[1], Date.now()]); regDirty = true;
+    T.set(d.mint, t);
     sub(d.mint); return;
   }
   const t = T.get(d.mint); if (!t) return;
@@ -222,6 +273,8 @@ function handle(d) {
     t.devBuy += sol; // eerste koop van de maker in dezelfde transactie: geen onafhankelijke koper
   } else if (d.txType === 'buy') {
     t.nBuys++; t.buyVol += sol; t.buyers.add(who); t.buyBy.set(who, (t.buyBy.get(who) || 0) + sol);
+    if (t.slot0 != null && d.slot != null && d.slot - t.slot0 <= SNIPE_SLOTS) { t.snipers.add(who); t.sniperVol += sol; }
+    if (t.early.size < EARLY_MAX && now - t.t0 <= EARLY_SECS * 1000) t.early.add(who);
     t.recent.push({ ts: now, sol, b: 1 });
   } else if (d.txType === 'sell') {
     t.nSells++; t.sellVol += sol; t.sellers.add(who); t.recent.push({ ts: now, sol, b: 0 });
@@ -250,6 +303,11 @@ function evaluate(t) {
     { k: 'run', label: 'RUN', ok: run <= c.maxRun, disp: `${run >= 0 ? '+' : ''}${run.toFixed(0)}%`, need: `≤${c.maxRun}%` },
     { k: 'dev', label: 'DEV', ok: !t.devSold, disp: t.devSold ? 'SOLD' : 'OK', need: 'clean' }
   ];
+  // Optioneel (standaard uit): wallet-/bundelsignalen. Zonder slot-data (PumpPortal) kan de sniper-check niets zien.
+  if (c.maxSniperShare < 100) { const sh = t.buyVol ? t.sniperVol / t.buyVol * 100 : 0; checks.push({ k: 'snipe', label: 'SNIPERS', ok: sh <= c.maxSniperShare, disp: `${sh.toFixed(0)}%`, need: `≤${c.maxSniperShare}%` }); }
+  if (c.minOrganic > 0) { const og = t.buyers.size - t.snipers.size; checks.push({ k: 'organic', label: 'ORGANISCH', ok: og >= c.minOrganic, disp: `${og}`, need: `≥${c.minOrganic}` }); }
+  if (c.maxDevRugs < 99) checks.push({ k: 'devhist', label: 'MAKER', ok: t.devRugs <= c.maxDevRugs, disp: `${t.devRugs}/${t.devN}`, need: `rugs ≤${c.maxDevRugs}` });
+  if (c.minSmart > 0) { let n = 0; for (const b of t.buyers) if (isSmart(b)) n++; checks.push({ k: 'smart', label: 'SLIM', ok: n >= c.minSmart, disp: `${n}`, need: `≥${c.minSmart}` }); }
   return { age, checks, dead: age > c.maxAge || t.devSold };
 }
 function blocker() {
@@ -437,20 +495,21 @@ const server = http.createServer((req, res) => {
 });
 
 function start() {
-  load(); pruneData();
+  load(); loadRegistry(); pruneData();
   server.listen(PORT, HOST, () => log(`dashboard: http://${HOST}:${PORT}`));
   if (process.env.DEMO) { connected = true; log('DEMO-modus: gesimuleerde tokens, geen echte feed'); require('./demo.js').start(handle); }
   else connect();
   setInterval(tick, 1000);
   setInterval(flush, 3000);
   setInterval(flushData, 5000);
+  setInterval(saveRegistry, 60000);
   setInterval(pruneData, 3600000);
   setInterval(() => { S.eqHist.push(equity()); if (S.eqHist.length > 1000) S.eqHist.shift(); save(); }, 300000);
-  const bye = () => { try { flush(); flushData(); } catch { /* */ } process.exit(0); };
+  const bye = () => { try { flush(); flushData(); saveRegistry(); } catch { /* */ } process.exit(0); };
   process.on('SIGTERM', bye); process.on('SIGINT', bye);
   process.on('uncaughtException', e => log('uncaught: ' + e.message));
   process.on('unhandledRejection', e => log('unhandled: ' + e));
 }
 
 if (require.main === module) start();
-module.exports = { handle, tick, close, checkEntry, finalize, flushData, getS: () => S, T, DEF, DATA_DIR };
+module.exports = { handle, tick, REG, registryUpdate, saveRegistry, loadRegistry, isSmart, evaluate, close, checkEntry, finalize, flushData, getS: () => S, T, DEF, DATA_DIR };

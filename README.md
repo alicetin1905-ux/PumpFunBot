@@ -79,9 +79,33 @@ npm run analyze                      # standaard: instap ~20 s, TP 12%, SL 8%
 npm run analyze -- --age=30 --tp=15 --sl=10 --minn=50
 ```
 
-Het script simuleert elke token met jouw kosten, toont per kenmerk de beste drempel en test combinaties op **onbekende** tokens
-(train op de eerste 70%, test op de laatste 30%). Alleen een combinatie die ook op de test positief blijft is een serieus
-kandidaat-filter; de rest is toeval. Pas filters pas aan na bevestiging op nieuwe data.
+Het script simuleert elke token met jouw kosten (fee, slippage, prijsimpact, priority fee, vertraging) en dezelfde uitstapregels als de bot
+(TP, SL, trailing stop, dev-verkoop, max houdtijd). Alle kosten zijn instelbaar, bv. `--fee=1.25 --slip=1 --prio=0.0008 --lat=1`. Onderdelen:
+
+1. **Kosten:** wat een rondreis kost (nu ≈ 6,7%) en bij welk winstpercentage je break-even draait. Bij TP 12% / SL 8% is dat ~74%.
+2. **TP/SL-raster:** gemiddeld netto resultaat per TP/SL-combinatie, met en zonder trailing, plus de beste instelling op de trainperiode met zijn
+   resultaat op de testperiode en een 95%-betrouwbaarheidsinterval (±). Is bijna alles negatief, dan helpt TP/SL-tuning niet en moeten de filters beter.
+3. **Wallet- en bundelsignalen:** vier vooraf gekozen hypothesen (geen datamining), gecorrigeerd voor meervoudig toetsen.
+4. **Beste filter per kenmerk en combinaties:** train op de eerste 70% (in tijd), test op de laatste 30%.
+
+Alleen een resultaat dat op de test positief blijft **met een interval boven 0** is een serieus kandidaat; de rest is toeval. Tokens met een eigen
+curve (zie boven) worden uitgesloten. Pas filters pas aan na bevestiging op nieuwe data.
+
+## Wallet- en bundelsignalen
+
+Per token worden extra kenmerken vastgelegd (in elk snapshot en bij elke trade) en kun je optioneel als filter gebruiken (standaard **uit**,
+dus het gedrag van de bot verandert niet tot je ze aanzet onder "Strategie & filters"):
+
+| Kenmerk | Betekenis | Filter (uit = ) |
+|---|---|---|
+| `snipers`, `sniperShare` | kopers binnen 2 slots (~1 s) na de creatie en hun aandeel van het koopvolume: bundels/snipers, nep-volume | MAX SNIPER-AANDEEL % (100) |
+| `organic` | unieke kopers min snipers | MIN ORGANISCHE KOPERS (0) |
+| `devN`, `devRugs` | eerdere tokens van dezelfde maker en hoeveel daarvan de maker zelf dumpte | MAX EERDERE MAKER-RUGS (99) |
+| `smart` | kopers die eerder vroeg (eerste 30 s) in tokens zaten die minstens verdubbelden (≥3 keer, ≥34%) | MIN SLIMME WALLETS (0) |
+
+Het register staat in `data/wallets.json` (max. 50k makers / 150k wallets, oudste verdwijnen) en leert alleen van afgeronde tokens uit het verleden,
+dus er lekt niets vooruit. De sniper-check heeft slot-data nodig en werkt dus alleen met de Solana-feed (`FEED=solana`). Pas een filter pas aan als
+sectie 3 van `npm run analyze` een significant effect laat zien op genoeg tokens.
 
 ## Strategie
 

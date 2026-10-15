@@ -5,7 +5,7 @@
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
-    "test": "node test.js && node test-feed.js",
+    "test": "node test.js && node test-feed.js && node test-analyze.js",
     "analyze": "node analyze.js"
   },
   "engines": {
