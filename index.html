@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="nl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FLINT</title>
+<style>
+:root{--bg:#0b0e14;--card:#131824;--line:#222a3a;--tx:#e6e9f0;--mut:#7d869a;--g:#2ecc71;--r:#ff5c6c;--y:#f5c542;--b:#4da3ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px -apple-system,Segoe UI,Roboto,sans-serif;padding:12px;max-width:900px;margin:auto}
+h1{font-size:20px;margin:4px 0 2px;letter-spacing:3px}h2{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;margin:0 0 8px}
+.sub{color:var(--mut);font-size:12px;margin-bottom:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.k{background:#0e1320;border:1px solid var(--line);border-radius:8px;padding:8px}
+.k b{display:block;font-size:17px;margin-top:2px}.k span{color:var(--mut);font-size:11px}
+.g{color:var(--g)}.r{color:var(--r)}.y{color:var(--y)}
+button{background:#1c2436;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:13px;cursor:pointer}
+button.p{background:var(--b);color:#00101f;border-color:var(--b);font-weight:600}
+button:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.cfg{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.cfg label{font-size:11px;color:var(--mut);display:block}
+.cfg input{width:100%;background:#0e1320;border:1px solid var(--line);color:var(--tx);border-radius:6px;padding:7px;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:12px}th{color:var(--mut);text-align:left;font-weight:500;padding:4px}td{padding:5px 4px;border-top:1px solid var(--line)}
+.scroll{overflow-x:auto}
+#log{height:130px;overflow:auto;font:11px ui-monospace,Menlo,monospace;color:var(--mut)}
+canvas{width:100%;height:110px;display:block}
+.gate li{margin:3px 0;list-style:none}.gate ul{padding:0;margin:6px 0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--r);margin-right:6px}.dot.on{background:var(--g)}
+</style></head><body>
+<h1>FLINT</h1>
+<div class="sub"><span class="dot" id="dot"></span><span id="conn">verbinden…</span> · pump.fun paper bot · PumpPortal feed</div>
+
+<div class="card"><div class="grid">
+<div class="k"><span>Balans (SOL)</span><b id="bal">5.000</b></div>
+<div class="k"><span>Equity</span><b id="eq">5.000</b></div>
+<div class="k"><span>Netto P&amp;L</span><b id="pnl">0.000</b></div>
+<div class="k"><span>Trades</span><b id="nt">0</b></div>
+<div class="k"><span>Win rate</span><b id="wr">–</b></div>
+<div class="k"><span>Fees betaald</span><b id="fees">0.000</b></div>
+<div class="k"><span>Max drawdown</span><b id="dd">0%</b></div>
+<div class="k"><span>Profit factor</span><b id="pf">–</b></div>
+</div>
+<canvas id="chart" style="margin-top:10px"></canvas>
+<div class="row" style="margin-top:10px">
+<button class="p" id="btnRun">▶ Start paper bot</button>
+<button id="btnReset">Reset</button>
+<button id="btnExport">Export CSV</button>
+</div></div>
+
+<div class="card gate"><h2>LIVE-poort</h2>
+<ul id="gateList"></ul>
+<div class="row"><button id="btnLive" disabled>🔒 Naar LIVE</button><span class="sub" id="liveMsg" style="margin:0"></span></div></div>
+
+<div class="card"><h2>Open posities</h2><div class="scroll"><table><thead><tr><th>Token</th><th>Instap</th><th>Nu</th><th>P&amp;L</th><th>Leeftijd</th><th></th></tr></thead><tbody id="open"></tbody></table></div></div>
+<div class="card"><h2>Laatste trades</h2><div class="scroll"><table><thead><tr><th>Token</th><th>P&amp;L SOL</th><th>%</th><th>Reden</th><th>Duur</th></tr></thead><tbody id="hist"></tbody></table></div></div>
+
+<div class="card"><h2>Strategie-instellingen</h2><div class="cfg" id="cfg"></div>
+<div class="sub" style="margin-top:8px">Wijzigingen gelden direct voor nieuwe trades.</div></div>
+<div class="card"><h2>Log</h2><div id="log"></div></div>
+
+<script>
+const DEF={start:5,size:0.25,maxOpen:4,reserve:0.5,
+ minAge:8,maxAge:60,minBuyers:6,minVol:1.5,ratio:2.5,minMcap:25,maxMcap:60,maxRun:60,
+ tp:12,sl:8,trailStart:8,trail:5,maxHold:90,stale:25,
+ feePct:1,slip:2,prio:0.0008,dailyLoss:0.8};
+const LBL={start:'Startbalans SOL',size:'Positie SOL',maxOpen:'Max open',reserve:'Reserve SOL',
+ minAge:'Min leeftijd s',maxAge:'Max leeftijd s',minBuyers:'Min unieke kopers',minVol:'Min koopvolume SOL',ratio:'Koop/verkoop ratio',
+ minMcap:'Min mcap SOL',maxMcap:'Max mcap SOL',maxRun:'Max stijging sinds start %',
+ tp:'Take profit %',sl:'Stop loss %',trailStart:'Trail start %',trail:'Trail afstand %',maxHold:'Max houdtijd s',stale:'Stale exit s',
+ feePct:'Fee per kant %',slip:'Slippage per kant %',prio:'Priority fee SOL',dailyLoss:'Daglimiet verlies SOL'};
+let S=JSON.parse(localStorage.getItem('flint')||'null')||{cfg:{...DEF},bal:DEF.start,pos:{},hist:[],fees:0,eqHist:[DEF.start],peakEq:DEF.start,dayKey:'',dayPnl:0,running:false};
+S.cfg={...DEF,...S.cfg};
+const T=new Map();let ws=null,live=false;
+const $=id=>document.getElementById(id);
+const save=()=>localStorage.setItem('flint',JSON.stringify(S));
+const log=m=>{const d=$('log');d.insertAdjacentHTML('afterbegin',`<div>${new Date().toLocaleTimeString('nl-BE')} ${m}</div>`);while(d.children.length>150)d.lastChild.remove()};
+const f=(n,d=3)=>(+n).toFixed(d);
+
+/* ---------- executor: zelfde interface voor paper en live ---------- */
+const Exec={
+ paper:{
+  buy(price,size,c){const fee=size*c.feePct/100;const fill=price*(1+c.slip/100);
+   return{tokens:(size-fee)/fill,fill,fee,prio:c.prio,cost:size+c.prio}},
+  sell(price,tokens,c){const fill=price*(1-c.slip/100);const gross=tokens*fill;const fee=gross*c.feePct/100;
+   return{fill,fee,prio:c.prio,proceeds:gross-fee-c.prio}}
+ },
+ liveBuy(){throw new Error('LIVE executor nog niet gekoppeld (Worker met wallet ontbreekt)')}
+};
+const ex=()=>Exec.paper; // LIVE blijft geblokkeerd tot Worker gekoppeld is
+
+/* ---------- feed ---------- */
+function connect(){
+ ws=new WebSocket('wss://pumpportal.fun/api/data');
+ ws.onopen=()=>{$('dot').classList.add('on');$('conn').textContent='live feed';ws.send(JSON.stringify({method:'subscribeNewToken'}));
+  Object.keys(S.pos).forEach(m=>sub(m))};
+ ws.onclose=()=>{$('dot').classList.remove('on');$('conn').textContent='herverbinden…';setTimeout(connect,2000)};
+ ws.onerror=()=>ws.close();
+ ws.onmessage=e=>{let d;try{d=JSON.parse(e.data)}catch{return}handle(d)};
+}
+const sub=m=>ws&&ws.readyState===1&&ws.send(JSON.stringify({method:'subscribeTokenTrade',keys:[m]}));
+const unsub=m=>ws&&ws.readyState===1&&ws.send(JSON.stringify({method:'unsubscribeTokenTrade',keys:[m]}));
+const price=d=>d.vSolInBondingCurve&&d.vTokensInBondingCurve?d.vSolInBondingCurve/d.vTokensInBondingCurve:null;
+
+function handle(d){
+ if(!d.mint)return;
+ if(d.txType==='create'){
+  const p=price(d);if(!p)return;
+  T.set(d.mint,{m:d.mint,sym:d.symbol||d.mint.slice(0,5),t0:Date.now(),creator:d.traderPublicKey,p0:p,p,mcap:d.marketCapSol||0,
+   buyers:new Set(),buyVol:0,sellVol:0,devSold:false,last:Date.now()});
+  sub(d.mint);return;
+ }
+ const t=T.get(d.mint)||S.pos[d.mint]&&{m:d.mint,sym:S.pos[d.mint].sym,p:S.pos[d.mint].last};
+ if(!t)return;
+ if(!T.has(d.mint))return;
+ const p=price(d);if(p){t.p=p;t.mcap=d.marketCapSol||t.mcap}
+ t.last=Date.now();
+ const sol=d.solAmount||0;
+ if(d.txType==='buy'){t.buyVol+=sol;t.buyers.add(d.traderPublicKey)}
+ else if(d.txType==='sell'){t.sellVol+=sol;if(d.traderPublicKey===t.creator)t.devSold=true}
+ const pos=S.pos[d.mint];
+ if(pos){pos.last=t.p;pos.peak=Math.max(pos.peak,t.p);if(t.devSold)return close(d.mint,'dev sold');checkExit(d.mint,pos)}
+ else if(S.running)checkEntry(t);
+}
+
+/* ---------- strategie ---------- */
+function dayReset(){const k=new Date().toDateString();if(S.dayKey!==k){S.dayKey=k;S.dayPnl=0}}
+function checkEntry(t){
+ const c=S.cfg;dayReset();
+ if(S.dayPnl<=-c.dailyLoss)return;
+ if(Object.keys(S.pos).length>=c.maxOpen)return;
+ if(S.bal<c.size+c.reserve)return;
+ const age=(Date.now()-t.t0)/1000;
+ if(age<c.minAge||age>c.maxAge)return;
+ if(t.devSold||t.buyers.size<c.minBuyers||t.buyVol<c.minVol)return;
+ if(t.buyVol/(t.sellVol+0.01)<c.ratio)return;
+ if(t.mcap<c.minMcap||t.mcap>c.maxMcap)return;
+ if((t.p/t.p0-1)*100>c.maxRun)return;
+ open(t);
+}
+function open(t){
+ const c=S.cfg,r=ex().buy(t.p,c.size,c);
+ S.bal-=r.cost;S.fees+=r.fee+r.prio;
+ S.pos[t.m]={m:t.m,sym:t.sym,entry:r.fill,tokens:r.tokens,cost:r.cost,t0:Date.now(),last:t.p,peak:t.p,feeIn:r.fee+r.prio};
+ log(`KOOP ${t.sym} @ mcap ${f(t.mcap,1)} (${t.buyers.size} kopers, ${f(t.buyVol,1)} SOL)`);save();render();
+}
+function checkExit(m,pos){
+ const c=S.cfg,g=(pos.last/pos.entry-1)*100,pk=(pos.peak/pos.entry-1)*100;
+ if(g>=c.tp)return close(m,'TP');
+ if(g<=-c.sl)return close(m,'SL');
+ if(pk>=c.trailStart&&pos.last<=pos.peak*(1-c.trail/100))return close(m,'trail');
+}
+function close(m,why){
+ const pos=S.pos[m];if(!pos)return;const c=S.cfg,r=ex().sell(pos.last,pos.tokens,c);
+ const pnl=r.proceeds-pos.cost;S.bal+=r.proceeds;S.fees+=r.fee+r.prio;dayReset();S.dayPnl+=pnl;
+ S.hist.unshift({sym:pos.sym,pnl,pct:pnl/pos.cost*100,why,dur:(Date.now()-pos.t0)/1000,t:Date.now()});
+ if(S.hist.length>500)S.hist.pop();
+ delete S.pos[m];unsub(m);T.delete(m);
+ log(`${pnl>=0?'WIN':'LOSS'} ${pos.sym} ${f(pnl,4)} SOL (${why})`);
+ const eq=equity();S.eqHist.push(eq);if(S.eqHist.length>600)S.eqHist.shift();S.peakEq=Math.max(S.peakEq,eq);
+ save();render();
+}
+function equity(){let v=S.bal;for(const p of Object.values(S.pos))v+=p.tokens*p.last*(1-S.cfg.slip/100)*(1-S.cfg.feePct/100);return v}
+
+/* ---------- timers ---------- */
+setInterval(()=>{
+ const now=Date.now(),c=S.cfg;
+ for(const [m,p] of Object.entries(S.pos)){
+  const t=T.get(m);
+  if((now-p.t0)/1000>c.maxHold)close(m,'max tijd');
+  else if(t&&(now-t.last)/1000>c.stale)close(m,'stale');
+ }
+ for(const [m,t] of T){if(!S.pos[m]&&now-t.t0>(c.maxAge+30)*1000){T.delete(m);unsub(m)}}
+ render();
+},1000);
+
+/* ---------- UI ---------- */
+function stats(){
+ const h=S.hist,n=h.length,w=h.filter(x=>x.pnl>0),gw=w.reduce((a,x)=>a+x.pnl,0),gl=-h.filter(x=>x.pnl<=0).reduce((a,x)=>a+x.pnl,0);
+ const eq=equity(),dd=S.peakEq?(S.peakEq-eq)/S.peakEq*100:0;
+ return{n,wr:n?w.length/n*100:0,pf:gl?gw/gl:(gw?99:0),pnl:eq-S.cfg.start,eq,dd}
+}
+function render(){
+ const s=stats();
+ $('bal').textContent=f(S.bal);$('eq').textContent=f(s.eq);
+ const p=$('pnl');p.textContent=(s.pnl>=0?'+':'')+f(s.pnl);p.className=s.pnl>=0?'g':'r';
+ $('nt').textContent=s.n;$('wr').textContent=s.n?f(s.wr,1)+'%':'–';$('fees').textContent=f(S.fees);
+ $('dd').textContent=f(Math.max(0,s.dd),1)+'%';$('pf').textContent=s.n?f(s.pf,2):'–';
+ $('btnRun').textContent=S.running?'⏸ Pauzeer':'▶ Start paper bot';
+ $('open').innerHTML=Object.values(S.pos).map(p=>{const g=(p.last/p.entry-1)*100;
+  return`<tr><td>${p.sym}</td><td>${p.entry.toExponential(2)}</td><td>${p.last.toExponential(2)}</td><td class="${g>=0?'g':'r'}">${f(g,1)}%</td><td>${Math.round((Date.now()-p.t0)/1000)}s</td><td><button onclick="close('${p.m}','handmatig')">✕</button></td></tr>`}).join('')||'<tr><td colspan=6 style="color:var(--mut)">geen</td></tr>';
+ $('hist').innerHTML=S.hist.slice(0,15).map(x=>`<tr><td>${x.sym}</td><td class="${x.pnl>=0?'g':'r'}">${f(x.pnl,4)}</td><td>${f(x.pct,1)}%</td><td>${x.why}</td><td>${Math.round(x.dur)}s</td></tr>`).join('')||'<tr><td colspan=5 style="color:var(--mut)">nog geen trades</td></tr>';
+ gate(s);chart();
+}
+function gate(s){
+ const ok=[
+  [s.n>=100,`Minstens 100 trades (${s.n})`],
+  [s.pnl>0,`Netto positief na fees (${f(s.pnl)} SOL)`],
+  [s.pf>=1.3,`Profit factor ≥ 1.3 (${s.n?f(s.pf,2):'–'})`],
+  [s.dd<=20,`Max drawdown ≤ 20% (${f(Math.max(0,s.dd),1)}%)`],
+  [S.hist.length>=1&&(Date.now()-S.hist[S.hist.length-1].t)>=3*864e5,'Minstens 3 dagen paper data']
+ ];
+ $('gateList').innerHTML=ok.map(([o,t])=>`<li>${o?'✅':'⬜'} ${t}</li>`).join('');
+ $('btnLive').disabled=!ok.every(x=>x[0]);
+ $('btnLive').textContent=$('btnLive').disabled?'🔒 Naar LIVE':'🔓 Naar LIVE';
+}
+function chart(){
+ const c=$('chart'),r=devicePixelRatio||1;c.width=c.clientWidth*r;c.height=c.clientHeight*r;
+ const x=c.getContext('2d'),d=S.eqHist,w=c.width,h=c.height;x.clearRect(0,0,w,h);
+ if(d.length<2)return;const mn=Math.min(...d,S.cfg.start),mx=Math.max(...d,S.cfg.start),sp=(mx-mn)||1;
+ const Y=v=>h-6-(v-mn)/sp*(h-12);
+ x.strokeStyle='#222a3a';x.beginPath();x.moveTo(0,Y(S.cfg.start));x.lineTo(w,Y(S.cfg.start));x.stroke();
+ x.strokeStyle=d[d.length-1]>=S.cfg.start?'#2ecc71':'#ff5c6c';x.lineWidth=2*r;x.beginPath();
+ d.forEach((v,i)=>{const px=i/(d.length-1)*w;i?x.lineTo(px,Y(v)):x.moveTo(px,Y(v))});x.stroke();
+}
+function buildCfg(){
+ $('cfg').innerHTML=Object.keys(DEF).map(k=>`<div><label>${LBL[k]}</label><input data-k="${k}" type="number" step="any" value="${S.cfg[k]}"></div>`).join('');
+ $('cfg').oninput=e=>{const k=e.target.dataset.k;if(k&&e.target.value!=='')S.cfg[k]=+e.target.value;save()};
+}
+$('btnRun').onclick=()=>{S.running=!S.running;log(S.running?'bot gestart':'bot gepauzeerd');save();render()};
+$('btnReset').onclick=()=>{if(confirm('Alles resetten?')){localStorage.removeItem('flint');location.reload()}};
+$('btnLive').onclick=()=>{$('liveMsg').textContent='Poort open, maar de LIVE-executor (Worker met aparte wallet) is nog niet gekoppeld.'};
+$('btnExport').onclick=()=>{const csv='token,pnl_sol,pct,reden,duur_s\n'+S.hist.map(x=>[x.sym,x.pnl,x.pct,x.why,x.dur].join(',')).join('\n');
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='flint-trades.csv';a.click()};
+buildCfg();render();connect();
+</script></body></html>
