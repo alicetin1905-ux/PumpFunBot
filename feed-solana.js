@@ -57,7 +57,8 @@ function decodeEvent(buf, ctx) {
     const isBuy = buf[56];
     if (isBuy > 1) throw new Error('is_buy ongeldig');
     const sol = u64(buf, 40), tok = u64(buf, 48), vSol = u64(buf, 97), vTok = u64(buf, 105);
-    if (!(vSol > 0 && vTok > 0)) throw new Error('lege reserves');
+    // Live gezien: een klein deel van de trades heeft virtual_sol_reserves = 0 (geen bruikbare prijs). Overslaan, geen formaatfout.
+    if (!(vSol > 0 && vTok > 0)) return null;
     const vSolH = vSol / 1e9, vTokH = vTok / 1e6;
     return { txType: isBuy ? 'buy' : 'sell', mint, solAmount: sol / 1e9, tokenAmount: tok / 1e6,
       traderPublicKey: buf.subarray(57, 89).toString('hex'),

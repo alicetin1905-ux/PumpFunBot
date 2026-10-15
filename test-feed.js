@@ -27,6 +27,10 @@ assert.strictEqual(msgs[0].txType, 'create'); assert.strictEqual(msgs[0].mint, F
 const m = F.decodeLogs(logs(trade(1, w(), 0.5, 31.5, 1.0e9)), ctx, e => errs.push(e))[0];
 assert.strictEqual(m.txType, 'buy'); assert.ok(Math.abs(m.solAmount - 0.5) < 1e-9); assert.ok(Math.abs(m.marketCapSol - 31.5) < 1e-6);
 assert.strictEqual(F.decodeLogs(logs(trade(0, w(), 0.5, 31, 1.0e9)), ctx)[0].txType, 'sell');
+// trade zonder reserves (live gezien): geen bericht en geen decodeerfout
+const errs0 = errs.length;
+assert.strictEqual(F.decodeLogs(logs(trade(1, w(), 0.5, 0, 0)), ctx, e => errs.push(e)).length, 0);
+assert.strictEqual(errs.length, errs0);
 // kapotte data crasht niet
 assert.strictEqual(F.decodeLogs(['Program data: AAAA', 'Program data: ' + F.TRADE.toString('base64')], ctx, e => errs.push(e)).length, 0);
 assert.ok(errs.length >= 1);
