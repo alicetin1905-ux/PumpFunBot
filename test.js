@@ -35,6 +35,15 @@ function heat(mint, tag, n = 6) { for (let i = 0; i < n; i++) buy(mint, tag + i,
   buy('LOSS', 'l9', 0.1, 28);
   assert(!S.pos.LOSS && S.hist[0].why === 'SL', 'SL verwacht, kreeg: ' + (S.hist[0] && S.hist[0].why));
 
+  // 2b) Echt fee-tarief uit het trade-event wordt bij koop en verkoop gebruikt; een vrijgestelde wallet (0 bps) overschrijft het niet
+  mk('FEE', 'devH');
+  const fbuy = (who, sol, vSol, feeBps) => B.handle({ txType: 'buy', mint: 'FEE', traderPublicKey: who, solAmount: sol, vSolInBondingCurve: vSol, vTokensInBondingCurve: 1e9, marketCapSol: vSol, feeBps });
+  for (let i = 0; i < 6; i++) fbuy('x' + i, 0.4, 30 + 0.1 * (i + 1), i === 5 ? 0 : 50);
+  assert(S.pos.FEE, 'positie verwacht');
+  assert.strictEqual(S.pos.FEE.feePct, 0.5, 'tarief 0,5% uit event, kreeg ' + S.pos.FEE.feePct);
+  B.close('FEE', 'handmatig');
+  assert(!S.pos.FEE && S.hist[0].why === 'handmatig');
+
   // 3) Dev verkoopt -> geen instap; te weinig kopers -> geen instap
   mk('RUG', 'devC');
   B.handle({ txType: 'sell', mint: 'RUG', traderPublicKey: 'devC', solAmount: 1, vSolInBondingCurve: 29, vTokensInBondingCurve: 1e9, marketCapSol: 30 });

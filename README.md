@@ -60,6 +60,7 @@ Paper trading is alleen nuttig als het niet te mooi is. Daarom:
 
 - **Bonding-curve fills:** je order loopt over de echte constant-product curve, dus je eigen koop duwt de prijs op en je verkoop drukt hem omlaag.
 - **Vertraging:** tussen signaal en fill zit 0,3–0,9 s; je krijgt de prijs van dat moment, niet die van het signaal.
+- **Echte fees:** het fee-tarief komt uit de trade-events zelf (nu 0,95% protocol + 0,30% creator = 1,25% per kant) en geldt per token voor koop, verkoop en equity. Vrijgestelde wallets (0%) tellen niet mee. Zonder fee-data (PumpPortal-feed) geldt de instelling "FEE/KANT %" (standaard 1,25; een eerder opgeslagen waarde in `data/state.json` blijft staan, pas die zo nodig aan in het dashboard).
 - **Mislukte orders:** standaard 8% van de kopen en 5% van de verkopen mislukt (kost alleen de priority fee, verkopen worden opnieuw geprobeerd).
 - **Stale exit met afslag:** een token waar niemand meer in handelt verkoop je niet tegen de laatste prijs (standaard 15% afslag).
 - Alles is instelbaar onder "Strategie & filters". Oude paper-resultaten van v1 worden gearchiveerd (`data/state.v1.json`).

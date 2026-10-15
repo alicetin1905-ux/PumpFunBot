@@ -38,6 +38,15 @@ assert.strictEqual(F.decodeLogs(logs(trade(0, w(), 0.5, 31, 1.0e9)), ctx)[0].txT
   assert.strictEqual(c2.customCurve, true); assert.ok(Math.abs(c2.vSolInBondingCurve - 0.040864876) < 1e-12);
   assert.ok(Math.abs(c2.marketCapSol - 0.040864876 / 1073000000 * 1e9) < 1e-9);
 }
+// fee-tarief uit het trade-event: 95 + 30 bps = 125; vrijgestelde wallet = 0; te kort event = undefined
+{
+  const withFee = (fb, cb) => { const b = trade(1, w(), 0.5, 31.5, 1.0e9); b.writeBigUInt64LE(BigInt(fb), 161); b.writeBigUInt64LE(BigInt(cb), 209); return b; };
+  assert.strictEqual(F.decodeLogs(logs(withFee(95, 30)), ctx)[0].feeBps, 125);
+  assert.strictEqual(F.decodeLogs(logs(withFee(0, 0)), ctx)[0].feeBps, 0);
+  assert.strictEqual(F.decodeLogs(logs(withFee(99999, 30)), ctx)[0].feeBps, undefined); // onzin → negeren
+  const short = trade(1, w(), 0.5, 31.5, 1.0e9).subarray(0, 129);
+  assert.strictEqual(F.decodeLogs(logs(short), ctx)[0].feeBps, undefined);
+}
 // trade zonder reserves (live gezien): geen bericht en geen decodeerfout
 const errs0 = errs.length;
 assert.strictEqual(F.decodeLogs(logs(trade(1, w(), 0.5, 0, 0)), ctx, e => errs.push(e)).length, 0);

@@ -10,7 +10,9 @@
 
    Event-indeling (Anchor; de eerste velden zijn stabiel, nieuwere versies voegen er achteraan velden aan toe):
      TradeEvent : disc(8) mint(32) sol_amount(u64) token_amount(u64) is_buy(u8) user(32) timestamp(i64)
-                  virtual_sol_reserves(u64) virtual_token_reserves(u64) real_sol_reserves(u64) real_token_reserves(u64) …
+                  virtual_sol_reserves(u64) virtual_token_reserves(u64) real_sol_reserves(u64) real_token_reserves(u64)
+                  fee_recipient(32) fee_basis_points(u64) fee(u64) creator(32) creator_fee_basis_points(u64) creator_fee(u64) …
+                  (live: gewone gebruikers betalen 95 + 30 bps = 1,25%; enkele vrijgestelde wallets 0)
      CreateEvent: disc(8) name(str) symbol(str) uri(str) mint(32) bonding_curve(32) user(32)
                   creator(32) timestamp(i64) virtual_token_reserves(u64) virtual_sol_reserves(u64) real_token_reserves(u64) token_supply(u64) …
                   (CreateV2-tokens kunnen met andere startreserves beginnen dan 30 SOL; live gezien van 0,01 tot 700+ SOL)
@@ -62,7 +64,13 @@ function decodeEvent(buf, ctx) {
     // Live gezien: trades met sol_amount = 0 en virtual_sol_reserves = 0 (tokenbeweging zonder SOL, geen markttrade). Overslaan, geen formaatfout.
     if (!(vSol > 0 && vTok > 0)) return null;
     const vSolH = vSol / 1e9, vTokH = vTok / 1e6;
-    return { txType: isBuy ? 'buy' : 'sell', mint, solAmount: sol / 1e9, tokenAmount: tok / 1e6,
+    // Totaal tarief (protocol + creator) in basispunten; alleen als het event lang genoeg is en de fee klopt met het bedrag.
+    let feeBps;
+    if (buf.length >= 217) {
+      const fb = u64(buf, 161), cb = u64(buf, 209);
+      if (fb <= 500 && cb <= 500) feeBps = fb + cb;
+    }
+    return { txType: isBuy ? 'buy' : 'sell', mint, solAmount: sol / 1e9, tokenAmount: tok / 1e6, feeBps,
       traderPublicKey: buf.subarray(57, 89).toString('hex'),
       vSolInBondingCurve: vSolH, vTokensInBondingCurve: vTokH, marketCapSol: vSolH / vTokH * 1e9 };
   }

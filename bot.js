@@ -35,7 +35,7 @@ const DEF = {
   start: 5, size: 0.25, maxOpen: 4, reserve: 0.5,
   minAge: 8, maxAge: 60, minBuyers: 6, minVol: 1.5, ratio: 2.5, minMcap: 25, maxMcap: 60, maxRun: 60,
   tp: 12, sl: 8, trailStart: 8, trail: 5, maxHold: 90, stale: 25,
-  feePct: 1, slip: 1, prio: 0.0008, dailyLoss: 0.8,
+  feePct: 1.25, slip: 1, prio: 0.0008, dailyLoss: 0.8,
   latMin: 300, latMax: 900, failBuy: 8, failSell: 5, staleHaircut: 15,
   logTokens: 1, logMinBuyers: 3, logHorizon: 180, keepDays: 10
 };
@@ -128,14 +128,14 @@ function finalize(t) {
 
 /* ---------- executor: echte bonding-curve (constant product) ---------- */
 const curve = {
-  buy(vSol, vTok, size, c) {
-    const fee = size * c.feePct / 100, net = size - fee;
+  buy(vSol, vTok, size, c, feePct = c.feePct) {
+    const fee = size * feePct / 100, net = size - fee;
     const out = (vTok - (vSol * vTok) / (vSol + net)) * (1 - c.slip / 100);
     return { tokens: out, fee, prio: c.prio, cost: size + c.prio, fill: net / out };
   },
-  sell(vSol, vTok, tokens, c, haircut = 0) {
+  sell(vSol, vTok, tokens, c, haircut = 0, feePct = c.feePct) {
     const gross = (vSol - (vSol * vTok) / (vTok + tokens)) * (1 - c.slip / 100) * (1 - haircut / 100);
-    const fee = gross * c.feePct / 100;
+    const fee = gross * feePct / 100;
     return { fee, prio: c.prio, proceeds: gross - fee - c.prio };
   }
 };
@@ -152,7 +152,7 @@ const unsub = m => { if (FEED === 'pumpportal') send({ method: 'unsubscribeToken
 const price = d => (d.vSolInBondingCurve && d.vTokensInBondingCurve) ? d.vSolInBondingCurve / d.vTokensInBondingCurve : null;
 
 function newTok(m, sym, creator, p, mcap, vSol, vTok, t0, devBuy) {
-  return { m, sym, t0, creator, p0: p, p, vSol, vTok, v0: vSol, mcap, peak: mcap, peakAge: 0, buyers: new Set(), sellers: new Set(), buyBy: new Map(),
+  return { m, sym, t0, creator, p0: p, p, vSol, vTok, v0: vSol, feePct: null, mcap, peak: mcap, peakAge: 0, buyers: new Set(), sellers: new Set(), buyBy: new Map(),
     recent: [], buyVol: 0, sellVol: 0, nTrades: 0, nBuys: 0, nSells: 0, devSold: false, devSoldAt: null, devBuy: devBuy || 0,
     last: Date.now(), path: [], snaps: [], snapIdx: 0, traded: false, pendingBuy: false, trade: null };
 }
@@ -211,6 +211,8 @@ function handle(d) {
   const t = T.get(d.mint); if (!t) return;
   const now = Date.now(), p = price(d);
   if (p) { t.p = p; t.vSol = d.vSolInBondingCurve; t.vTok = d.vTokensInBondingCurve; }
+  // Echt tarief uit het trade-event (laatste niet-nul; vrijgestelde wallets betalen 0 en zeggen niets over ons tarief).
+  if (d.feeBps > 0) t.feePct = d.feeBps / 100;
   if (d.marketCapSol) t.mcap = d.marketCapSol;
   if (t.mcap > t.peak) { t.peak = t.mcap; t.peakAge = (now - t.t0) / 1000; }
   t.last = now; t.nTrades++;
@@ -278,10 +280,11 @@ function fillBuy(m, feat) {
     log(`KOOP MISLUKT ${t.sym} (-${c.prio} SOL fee)`); save(); return;
   }
   if (S.bal < c.size + c.prio) return;
-  const r = curve.buy(t.vSol, t.vTok, c.size, c);
+  const feePct = t.feePct != null ? t.feePct : c.feePct;
+  const r = curve.buy(t.vSol, t.vTok, c.size, c, feePct);
   S.bal -= r.cost; S.fees += r.fee + r.prio; t.traded = true;
   S.pos[m] = { m, sym: t.sym, creator: t.creator, entry: r.fill, tokens: r.tokens, cost: r.cost, t0: Date.now(), last: t.p, peak: t.p, low: t.p,
-    vSol: t.vSol, vTok: t.vTok, feat, entryMcap: t.mcap, selling: false };
+    vSol: t.vSol, vTok: t.vTok, feePct, feat, entryMcap: t.mcap, selling: false };
   log(`KOOP ${t.sym} mcap ${t.mcap.toFixed(1)} (${t.buyers.size} kopers, ${t.buyVol.toFixed(1)} SOL)`);
   save();
 }
@@ -304,7 +307,8 @@ function fillSell(m, why, attempt) {
     if (attempt < 2) { log(`VERKOOP MISLUKT ${pos.sym}, opnieuw (${attempt + 1}/2)`); return schedule(() => fillSell(m, why, attempt + 1), lat()); }
     log(`VERKOOP MISLUKT ${pos.sym}, later opnieuw`); pos.selling = false; return;
   }
-  const r = curve.sell(pos.vSol, pos.vTok, pos.tokens, c, why === 'stale' ? c.staleHaircut : 0);
+  const t0 = T.get(m), feePct = t0 && t0.feePct != null ? t0.feePct : pos.feePct;
+  const r = curve.sell(pos.vSol, pos.vTok, pos.tokens, c, why === 'stale' ? c.staleHaircut : 0, feePct);
   const pnl = r.proceeds - pos.cost;
   S.bal += r.proceeds; S.fees += r.fee + r.prio; dayReset(); S.dayPnl += pnl; S.totalTrades++;
   const t = T.get(m);
@@ -320,7 +324,7 @@ function fillSell(m, why, attempt) {
 }
 const equity = () => {
   let v = S.bal;
-  for (const p of Object.values(S.pos)) v += curve.sell(p.vSol, p.vTok, p.tokens, S.cfg).proceeds;
+  for (const p of Object.values(S.pos)) v += curve.sell(p.vSol, p.vTok, p.tokens, S.cfg, 0, p.feePct != null ? p.feePct : S.cfg.feePct).proceeds;
   return v;
 };
 
