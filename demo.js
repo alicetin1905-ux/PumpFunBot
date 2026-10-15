@@ -15,7 +15,7 @@ function start(handle) {
     const t = { mint: 'DEMO' + (++id) + Math.random().toString(36).slice(2, 8), sym: pick(NAMES) + (Math.random() < .5 ? '' : Math.floor(rnd(1, 99))),
       dev: 'dev' + id, vSol: 30, born: Date.now(), heat: kind < .25 ? rnd(.75, .92) : kind < .8 ? rnd(.4, .65) : rnd(.15, .35), rug: Math.random() < .12 };
     toks.push(t);
-    handle({ txType: 'create', mint: t.mint, symbol: t.sym, traderPublicKey: t.dev, vSolInBondingCurve: 30, vTokensInBondingCurve: 1e9, marketCapSol: 30 });
+    handle({ txType: 'create', mint: t.mint, symbol: t.sym, traderPublicKey: t.dev, solAmount: rnd(0, 2), vSolInBondingCurve: 30, vTokensInBondingCurve: 1e9, marketCapSol: 30 });
   }, 1400);
 
   setInterval(() => {

@@ -108,7 +108,7 @@ details summary::-webkit-details-marker{display:none}
 <header>
  <div class="radar" id="radar"></div>
  <div class="logo orb">FLINT</div>
- <div class="status"><span id="conn">VERBINDEN…</span><span>UPTIME <b id="up">–</b> · GEVOLGD <b id="trk">0</b> · KLAAR <b id="rdy" class="g">0</b></span></div>
+ <div class="status"><span id="conn">VERBINDEN…</span><span>UPTIME <b id="up">–</b> · GEVOLGD <b id="trk">0</b> · KLAAR <b id="rdy" class="g">0</b> · DATA <b id="dat">–</b> · MISLUKT <b id="fl">0</b></span></div>
  <div class="spacer"></div>
  <span class="pill" id="blk" style="display:none"></span>
  <span class="pill demo" id="demo" style="display:none">DEMO</span>
@@ -147,11 +147,11 @@ details summary::-webkit-details-marker{display:none}
  <div style="color:var(--mut);font-size:11px;margin-top:8px">Wijzigingen gelden direct en blijven bewaard.</div>
  <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn mg" id="btnReset">RESET</button><a href="/api/trades.csv"><button class="btn">EXPORT CSV</button></a></div></details></div>
 
-<div class="panel gate"><h2>LIVE-POORT</h2><ul id="gateList"></ul>
- <div style="display:flex;gap:10px;align-items:center"><button class="btn mg" id="btnLive" disabled>🔒 NAAR LIVE</button><span id="liveMsg" style="color:var(--mut);font-size:11px"></span></div></div>
+<div class="panel gate"><h2>PAPER-VALIDATIE <small>wanneer zijn de resultaten betrouwbaar genoeg?</small></h2><ul id="gateList"></ul>
+ <div id="gateVerdict" style="color:var(--mut);font-size:11px;margin-top:6px"></div></div>
 
 <script>
-const LBL={start:'STARTBALANS SOL',size:'POSITIE SOL',maxOpen:'MAX OPEN',reserve:'RESERVE SOL',minAge:'MIN LEEFTIJD S',maxAge:'MAX LEEFTIJD S',minBuyers:'MIN KOPERS',minVol:'MIN KOOPVOL SOL',ratio:'KOOP/VERK RATIO',minMcap:'MIN MCAP',maxMcap:'MAX MCAP',maxRun:'MAX STIJGING %',tp:'TAKE PROFIT %',sl:'STOP LOSS %',trailStart:'TRAIL START %',trail:'TRAIL AFSTAND %',maxHold:'MAX HOUDTIJD S',stale:'STALE EXIT S',feePct:'FEE/KANT %',slip:'SLIPPAGE/KANT %',prio:'PRIORITY FEE',dailyLoss:'DAGLIMIET VERLIES'};
+const LBL={start:'STARTBALANS SOL',size:'POSITIE SOL',maxOpen:'MAX OPEN',reserve:'RESERVE SOL',minAge:'MIN LEEFTIJD S',maxAge:'MAX LEEFTIJD S',minBuyers:'MIN KOPERS',minVol:'MIN KOOPVOL SOL',ratio:'KOOP/VERK RATIO',minMcap:'MIN MCAP',maxMcap:'MAX MCAP',maxRun:'MAX STIJGING %',tp:'TAKE PROFIT %',sl:'STOP LOSS %',trailStart:'TRAIL START %',trail:'TRAIL AFSTAND %',maxHold:'MAX HOUDTIJD S',stale:'STALE EXIT S',feePct:'FEE/KANT %',slip:'SLIPPAGE/KANT %',prio:'PRIORITY FEE',dailyLoss:'DAGLIMIET VERLIES',latMin:'VERTRAGING MIN MS',latMax:'VERTRAGING MAX MS',failBuy:'KANS MISLUKTE KOOP %',failSell:'KANS MISLUKTE VERKOOP %',staleHaircut:'STALE AFSLAG %',logTokens:'DATA LOGGEN (1/0)',logMinBuyers:'LOG MIN KOPERS',logHorizon:'LOG HORIZON S',keepDays:'DATA BEWAREN DAGEN'};
 const $=id=>document.getElementById(id),f=(n,d=3)=>(+n).toFixed(d);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
@@ -211,6 +211,7 @@ function draw(s){
  $('conn').textContent=s.connected?'LIVE FEED':'FEED VERBROKEN';$('radar').classList.toggle('off',!s.connected);
  const up=(Date.now()-s.startedAt)/36e5;$('up').textContent=up<48?f(up,1)+' u':f(up/24,1)+' d';
  $('trk').textContent=s.trackedTotal;$('rdy').textContent=s.readyCount;
+ $('dat').textContent=s.data.on?`${s.data.saved} tokens · ${(s.data.bytes/1e6).toFixed(1)} MB`:'uit';$('fl').textContent=s.failed;
  const b=$('blk');b.style.display=s.blocked?'':'none';b.textContent='⚠ '+(s.blocked||'');b.className='pill'+(s.blocked?' warn':'');
  $('demo').style.display=s.demo?'':'none';
  const st=s.stats;
@@ -246,7 +247,8 @@ function gate(s){
  const st=s.stats;
  const ok=[[st.n>=100,`≥100 trades (${st.n})`],[st.pnl>0,`netto positief na fees (${f(st.pnl)} SOL)`],[st.pf>=1.3,`profit factor ≥1.3 (${st.n?f(st.pf,2):'–'})`],[st.dd<=20,`drawdown ≤20% (${f(st.dd,1)}%)`],[s.hist.length>0&&Date.now()-s.startedAt>=3*864e5,'≥3 dagen paper data']];
  $('gateList').innerHTML=ok.map(([o,t])=>`<li style="color:${o?'var(--ok)':'var(--mut)'}">${o?'◉':'○'} ${t}</li>`).join('');
- const all=ok.every(x=>x[0]);$('btnLive').disabled=!all;$('btnLive').textContent=all?'🔓 NAAR LIVE':'🔒 NAAR LIVE';
+ const n=ok.filter(x=>x[0]).length;
+ $('gateVerdict').textContent=n===ok.length?'✔ Alle criteria gehaald: de paper-resultaten zijn statistisch redelijk betrouwbaar.':`${n}/${ok.length} criteria gehaald — nog niet genoeg data of nog niet winstgevend.`;
 }
 function chart(d,start){
  const c=$('chart'),r=devicePixelRatio||1;c.width=c.clientWidth*r;c.height=c.clientHeight*r;
@@ -288,7 +290,6 @@ $('cfg').addEventListener('change',e=>{const k=e.target.dataset.k;if(k&&e.target
 document.addEventListener('click',e=>{const m=e.target.dataset&&e.target.dataset.close;if(m)post('/api/close',{mint:m}).then(poll)});
 $('btnRun').onclick=()=>post('/api/run',{running:!(last&&last.running)}).then(poll);
 $('btnReset').onclick=()=>{if(confirm('Alles resetten (balans, trades, posities)?'))post('/api/reset',{confirm:true}).then(()=>{cfgBuilt=false;poll()})};
-$('btnLive').onclick=()=>{$('liveMsg').textContent='Poort open, maar de LIVE-executor (aparte wallet) is nog niet gekoppeld.'};
 async function poll(){
  try{const s=await(await fetch('/api/state')).json();last=s;draw(s)}
  catch{$('conn').textContent='BOT ONBEREIKBAAR';$('radar').classList.add('off')}

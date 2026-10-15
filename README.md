@@ -1,7 +1,7 @@
 # FLINT — pump.fun paper bot
 
-Paper trading bot voor pump.fun (PumpPortal websocket-feed). Start met een virtuele 5 SOL en rekent met
-realistische kosten per kant: 1% fee, 2% slippage en een priority fee. Geen wallet, geen keys.
+Paper trading bot voor pump.fun op de live PumpPortal-feed, met virtueel geld (start: 5 SOL).
+Geen wallet, geen keys, geen echt geld.
 
 Twee versies:
 
@@ -45,6 +45,34 @@ Het dashboard toont live welke tokens gevolgd worden en welke filters ze halen:
 
 Voorbeeld zonder feed (gesimuleerde tokens): `DEMO=1 DATA_DIR=/tmp/flint-demo node bot.js`
 
+## Realistische simulatie (v2)
+
+Paper trading is alleen nuttig als het niet te mooi is. Daarom:
+
+- **Bonding-curve fills:** je order loopt over de echte constant-product curve, dus je eigen koop duwt de prijs op en je verkoop drukt hem omlaag.
+- **Vertraging:** tussen signaal en fill zit 0,3–0,9 s; je krijgt de prijs van dat moment, niet die van het signaal.
+- **Mislukte orders:** standaard 8% van de kopen en 5% van de verkopen mislukt (kost alleen de priority fee, verkopen worden opnieuw geprobeerd).
+- **Stale exit met afslag:** een token waar niemand meer in handelt verkoop je niet tegen de laatste prijs (standaard 15% afslag).
+- Alles is instelbaar onder "Strategie & filters". Oude paper-resultaten van v1 worden gearchiveerd (`data/state.v1.json`).
+
+## Data en analyse
+
+Elke gevolgde token (met minimaal 3 kopers) wordt vastgelegd in `data/tokens-DATUM.jsonl`: features op 5/10/15/20/30/45/60 s,
+het prijspad per 2 s tot 3 minuten, en de uitkomst. Ook tokens die de bot niet kocht, zodat je filters kunt testen zonder
+te wachten op live trades. Elke bot-trade komt in `data/trades.jsonl` met zijn instap-features. Oude dagbestanden worden na
+10 dagen verwijderd (`keepDays`).
+
+Na een paar dagen draaien:
+
+```bash
+npm run analyze                      # standaard: instap ~20 s, TP 12%, SL 8%
+npm run analyze -- --age=30 --tp=15 --sl=10 --minn=50
+```
+
+Het script simuleert elke token met jouw kosten, toont per kenmerk de beste drempel en test combinaties op **onbekende** tokens
+(train op de eerste 70%, test op de laatste 30%). Alleen een combinatie die ook op de test positief blijft is een serieus
+kandidaat-filter; de rest is toeval. Pas filters pas aan na bevestiging op nieuwe data.
+
 ## Strategie
 
 - **Instap:** genoeg unieke kopers, koopvolume en koop/verkoop-ratio, mcap binnen een bereik, token niet al te ver gestegen, dev heeft niet verkocht.
@@ -52,11 +80,9 @@ Voorbeeld zonder feed (gesimuleerde tokens): `DEMO=1 DATA_DIR=/tmp/flint-demo no
 - **Risico:** daglimiet voor verlies, maximaal aantal open posities, reserve.
 - Alle waardes zijn aanpasbaar in het dashboard.
 
-## LIVE-poort
+## Alleen paper
 
-De LIVE-knop opent pas na 100+ trades, 3 dagen data, netto positief, profit factor ≥ 1.3 en max drawdown ≤ 20%.
-De LIVE-executor is **nog niet gekoppeld**. Een echte wallet hoort nooit in de HTML; dat wordt een aparte executor met een
-dedicated wallet met een klein bedrag.
+Er is bewust geen echt-geld-uitvoering. De PAPER-VALIDATIE-checklist in het dashboard (100+ trades, 3 dagen data, netto positief,
+profit factor ≥ 1,3, max drawdown ≤ 20%) laat zien wanneer de paper-resultaten betrouwbaar genoeg zijn om iets uit te concluderen.
 
-Paper-resultaten zijn optimistischer dan echt handelen (snellere bots, mislukte transacties, hogere slippage).
-Geen financieel advies; je kunt je hele inleg verliezen.
+Paper-resultaten blijven optimistischer dan echt handelen (snellere bots, mislukte transacties, hogere slippage). Geen financieel advies.
