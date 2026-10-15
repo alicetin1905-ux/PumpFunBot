@@ -92,7 +92,9 @@ function handle(d) {
   if (!d || !d.mint) return;
   if (d.txType === 'create') {
     const p = price(d); if (!p) return;
-    T.set(d.mint, { m: d.mint, sym: d.symbol || d.mint.slice(0, 5), t0: Date.now(), creator: d.traderPublicKey, p0: p, p,
+    // Tokennamen zijn door gebruikers gekozen en dus onbetrouwbaar: alleen veilige tekens, kort.
+    const sym = String(d.symbol || '').replace(/[^\p{L}\p{N}$._-]/gu, '').slice(0, 14) || String(d.mint).slice(0, 5);
+    T.set(d.mint, { m: d.mint, sym, t0: Date.now(), creator: d.traderPublicKey, p0: p, p,
       mcap: d.marketCapSol || 0, buyers: new Set(), buyVol: 0, sellVol: 0, devSold: false, last: Date.now() });
     sub(d.mint); return;
   }
@@ -113,18 +115,45 @@ function handle(d) {
 
 /* ---------- strategie ---------- */
 function dayReset() { const k = new Date().toDateString(); if (S.dayKey !== k) { S.dayKey = k; S.dayPnl = 0; } }
-function checkEntry(t) {
+/* Eén bron van waarheid: dezelfde filters sturen de bot én het dashboard. */
+function evaluate(t) {
+  const c = S.cfg, age = (Date.now() - t.t0) / 1000;
+  const ratio = Math.min(99, t.buyVol / (t.sellVol + 0.01)), run = (t.p / t.p0 - 1) * 100;
+  const checks = [
+    { k: 'age', label: 'LEEFT', ok: age >= c.minAge && age <= c.maxAge, wait: age < c.minAge, disp: `${Math.floor(age)}s`, need: `${c.minAge}–${c.maxAge}s` },
+    { k: 'buyers', label: 'KOPERS', ok: t.buyers.size >= c.minBuyers, disp: `${t.buyers.size}`, need: `≥${c.minBuyers}` },
+    { k: 'vol', label: 'VOL', ok: t.buyVol >= c.minVol, disp: t.buyVol.toFixed(1), need: `≥${c.minVol}` },
+    { k: 'ratio', label: 'RATIO', ok: ratio >= c.ratio, disp: ratio >= 99 ? '∞' : ratio.toFixed(1), need: `≥${c.ratio}` },
+    { k: 'mcap', label: 'MCAP', ok: t.mcap >= c.minMcap && t.mcap <= c.maxMcap, disp: t.mcap.toFixed(0), need: `${c.minMcap}–${c.maxMcap}` },
+    { k: 'run', label: 'RUN', ok: run <= c.maxRun, disp: `${run >= 0 ? '+' : ''}${run.toFixed(0)}%`, need: `≤${c.maxRun}%` },
+    { k: 'dev', label: 'DEV', ok: !t.devSold, disp: t.devSold ? 'SOLD' : 'OK', need: 'clean' }
+  ];
+  return { age, checks, dead: age > c.maxAge || t.devSold };
+}
+function blocker() {
   const c = S.cfg; dayReset();
-  if (S.dayPnl <= -c.dailyLoss) return;
-  if (Object.keys(S.pos).length >= c.maxOpen) return;
-  if (S.bal < c.size + c.reserve) return;
-  const age = (Date.now() - t.t0) / 1000;
-  if (age < c.minAge || age > c.maxAge) return;
-  if (t.devSold || t.buyers.size < c.minBuyers || t.buyVol < c.minVol) return;
-  if (t.buyVol / (t.sellVol + 0.01) < c.ratio) return;
-  if (t.mcap < c.minMcap || t.mcap > c.maxMcap) return;
-  if ((t.p / t.p0 - 1) * 100 > c.maxRun) return;
-  open(t);
+  if (!S.running) return 'bot gepauzeerd';
+  if (S.dayPnl <= -c.dailyLoss) return 'daglimiet verlies bereikt';
+  if (Object.keys(S.pos).length >= c.maxOpen) return 'max open posities bereikt';
+  if (S.bal < c.size + c.reserve) return 'onvoldoende vrije balans';
+  return null;
+}
+function checkEntry(t) {
+  if (blocker()) return;
+  if (evaluate(t).checks.every(x => x.ok)) open(t);
+}
+function radar() {
+  const rows = [];
+  for (const t of T.values()) {
+    if (S.pos[t.m]) continue;
+    const ev = evaluate(t), passed = ev.checks.filter(x => x.ok).length;
+    rows.push({ m: t.m, sym: t.sym, age: ev.age, mcap: t.mcap, checks: ev.checks, passed, total: ev.checks.length,
+      ready: passed === ev.checks.length, dead: ev.dead });
+  }
+  const funnel = (rows[0] ? rows[0].checks : evaluate({ t0: Date.now(), p: 1, p0: 1, mcap: 0, buyers: new Set(), buyVol: 0, sellVol: 0, devSold: false }).checks)
+    .map((c, i) => ({ k: c.k, label: c.label, need: c.need, ok: rows.filter(r => r.checks[i].ok).length, total: rows.length }));
+  rows.sort((a, b) => (a.dead - b.dead) || (b.passed - a.passed) || (a.age - b.age));
+  return { tokens: rows.slice(0, 60), funnel, trackedTotal: rows.length, readyCount: rows.filter(r => r.ready).length };
 }
 function open(t) {
   const c = S.cfg, r = Exec.buy(t.p, c.size, c);
@@ -176,7 +205,8 @@ function stats() {
 }
 const state = () => ({
   connected, running: S.running, bal: S.bal, fees: S.fees, stats: stats(), cfg: S.cfg, def: DEF,
-  startedAt: S.startedAt, tracked: T.size, dayPnl: S.dayPnl,
+  startedAt: S.startedAt, tracked: T.size, dayPnl: S.dayPnl, blocked: blocker(), demo: !!process.env.DEMO,
+  ...radar(),
   pos: Object.values(S.pos), hist: S.hist.slice(0, 50), eqHist: S.eqHist, logs: LOGS.slice(0, 80)
 });
 
@@ -190,7 +220,10 @@ const server = http.createServer((req, res) => {
   const u = req.url.split('?')[0];
   if (req.method === 'GET') {
     if (u === '/' || u === '/index.html') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:"
+      });
       return res.end(fs.readFileSync(path.join(__dirname, 'dashboard.html')));
     }
     if (u === '/api/state') return json(res, state());
@@ -224,7 +257,8 @@ const server = http.createServer((req, res) => {
 function start() {
   load();
   server.listen(PORT, HOST, () => log(`dashboard: http://${HOST}:${PORT}`));
-  connect();
+  if (process.env.DEMO) { connected = true; log('DEMO-modus: gesimuleerde tokens, geen echte feed'); require('./demo.js').start(handle); }
+  else connect();
   setInterval(tick, 1000);
   setInterval(flush, 3000);
   setInterval(() => { S.eqHist.push(equity()); if (S.eqHist.length > 1000) S.eqHist.shift(); save(); }, 300000);

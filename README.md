@@ -34,6 +34,17 @@ Zonder internet of tijdens slaap ziet de bot geen prijzen; open posities worden 
 
 Test de logica zonder netwerk: `npm test`.
 
+## Radar-dashboard
+
+Het dashboard toont live welke tokens gevolgd worden en welke filters ze halen:
+
+- **Filter scan:** per filter hoeveel gevolgde tokens hem nu halen.
+- **Token radar:** per token een ring (x/7 filters), zeven chips met de actuele waarde (groen = gehaald, rood = niet, oranje = nog te jong). Een token dat alles haalt krijgt een groene LOCK-gloed. Kaarten schuiven vloeiend naar boven als ze meer filters halen.
+- Filter de radar met ALLE / ≥5/7 / KLAAR. Filter-drempels pas je aan onder "Strategie & filters".
+- Dezelfde filterfunctie stuurt de bot en het dashboard, dus wat je ziet is precies wat de bot doet.
+
+Voorbeeld zonder feed (gesimuleerde tokens): `DEMO=1 DATA_DIR=/tmp/flint-demo node bot.js`
+
 ## Strategie
 
 - **Instap:** genoeg unieke kopers, koopvolume en koop/verkoop-ratio, mcap binnen een bereik, token niet al te ver gestegen, dev heeft niet verkocht.
