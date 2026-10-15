@@ -1,0 +1,13 @@
+{
+  "name": "flint-pumpfun-paper-bot",
+  "version": "1.0.0",
+  "description": "FLINT: pump.fun paper trading bot (headless Node, 24/7 op een Mac)",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "test": "node test.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": { "ws": "^8.18.0" },
+  "license": "MIT"
+}

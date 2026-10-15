@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="nl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FLINT</title>
+<style>
+:root{--bg:#0b0e14;--card:#131824;--line:#222a3a;--tx:#e6e9f0;--mut:#7d869a;--g:#2ecc71;--r:#ff5c6c;--b:#4da3ff}
+*{box-sizing:border-box}body{margin:auto;background:var(--bg);color:var(--tx);font:14px -apple-system,Segoe UI,Roboto,sans-serif;padding:12px;max-width:900px}
+h1{font-size:20px;margin:4px 0 2px;letter-spacing:3px}h2{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:1px;margin:0 0 8px}
+.sub{color:var(--mut);font-size:12px;margin-bottom:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.k{background:#0e1320;border:1px solid var(--line);border-radius:8px;padding:8px}
+.k b{display:block;font-size:17px;margin-top:2px}.k span{color:var(--mut);font-size:11px}
+.g{color:var(--g)}.r{color:var(--r)}
+button{background:#1c2436;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:13px;cursor:pointer}
+button.p{background:var(--b);color:#00101f;border-color:var(--b);font-weight:600}
+button:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.cfg{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.cfg label{font-size:11px;color:var(--mut);display:block}
+.cfg input{width:100%;background:#0e1320;border:1px solid var(--line);color:var(--tx);border-radius:6px;padding:7px;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:12px}th{color:var(--mut);text-align:left;font-weight:500;padding:4px}td{padding:5px 4px;border-top:1px solid var(--line)}
+.scroll{overflow-x:auto}
+#log{height:130px;overflow:auto;font:11px ui-monospace,Menlo,monospace;color:var(--mut);white-space:pre-wrap}
+canvas{width:100%;height:110px;display:block}
+.gate ul{padding:0;margin:6px 0}.gate li{margin:3px 0;list-style:none}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--r);margin-right:6px}.dot.on{background:var(--g)}
+a{color:var(--b)}
+</style></head><body>
+<h1>FLINT</h1>
+<div class="sub"><span class="dot" id="dot"></span><span id="conn">verbinden…</span> · pump.fun paper bot · draait op deze Mac · <span id="up"></span></div>
+
+<div class="card"><div class="grid">
+<div class="k"><span>Balans (SOL)</span><b id="bal">–</b></div>
+<div class="k"><span>Equity</span><b id="eq">–</b></div>
+<div class="k"><span>Netto P&amp;L</span><b id="pnl">–</b></div>
+<div class="k"><span>Trades</span><b id="nt">0</b></div>
+<div class="k"><span>Win rate</span><b id="wr">–</b></div>
+<div class="k"><span>Fees betaald</span><b id="fees">–</b></div>
+<div class="k"><span>Max drawdown</span><b id="dd">–</b></div>
+<div class="k"><span>Profit factor</span><b id="pf">–</b></div>
+</div>
+<canvas id="chart" style="margin-top:10px"></canvas>
+<div class="row" style="margin-top:10px">
+<button class="p" id="btnRun">…</button>
+<button id="btnReset">Reset</button>
+<a href="/api/trades.csv"><button>Export CSV</button></a>
+</div></div>
+
+<div class="card gate"><h2>LIVE-poort</h2><ul id="gateList"></ul>
+<div class="row"><button id="btnLive" disabled>🔒 Naar LIVE</button><span class="sub" id="liveMsg" style="margin:0"></span></div></div>
+
+<div class="card"><h2>Open posities</h2><div class="scroll"><table><thead><tr><th>Token</th><th>Instap</th><th>Nu</th><th>P&amp;L</th><th>Leeftijd</th><th></th></tr></thead><tbody id="open"></tbody></table></div></div>
+<div class="card"><h2>Laatste trades</h2><div class="scroll"><table><thead><tr><th>Token</th><th>P&amp;L SOL</th><th>%</th><th>Reden</th><th>Duur</th></tr></thead><tbody id="hist"></tbody></table></div></div>
+<div class="card"><h2>Strategie-instellingen</h2><div class="cfg" id="cfg"></div>
+<div class="sub" style="margin-top:8px">Wijzigingen gelden direct voor nieuwe trades en blijven bewaard.</div></div>
+<div class="card"><h2>Log</h2><div id="log"></div></div>
+
+<script>
+const LBL={start:'Startbalans SOL',size:'Positie SOL',maxOpen:'Max open',reserve:'Reserve SOL',
+ minAge:'Min leeftijd s',maxAge:'Max leeftijd s',minBuyers:'Min unieke kopers',minVol:'Min koopvolume SOL',ratio:'Koop/verkoop ratio',
+ minMcap:'Min mcap SOL',maxMcap:'Max mcap SOL',maxRun:'Max stijging sinds start %',
+ tp:'Take profit %',sl:'Stop loss %',trailStart:'Trail start %',trail:'Trail afstand %',maxHold:'Max houdtijd s',stale:'Stale exit s',
+ feePct:'Fee per kant %',slip:'Slippage per kant %',prio:'Priority fee SOL',dailyLoss:'Daglimiet verlies SOL'};
+const $=id=>document.getElementById(id),f=(n,d=3)=>(+n).toFixed(d);
+const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+let cfgBuilt=false,last=null;
+async function poll(){
+ try{const s=await (await fetch('/api/state')).json();last=s;draw(s)}
+ catch{$('dot').classList.remove('on');$('conn').textContent='bot onbereikbaar'}
+}
+function draw(s){
+ $('dot').classList.toggle('on',s.connected);$('conn').textContent=s.connected?'live feed ('+s.tracked+' tokens gevolgd)':'feed verbroken';
+ const up=(Date.now()-s.startedAt)/36e5;$('up').textContent='sinds '+(up<48?f(up,1)+' u':f(up/24,1)+' d');
+ const st=s.stats;
+ $('bal').textContent=f(s.bal);$('eq').textContent=f(st.eq);
+ const p=$('pnl');p.textContent=(st.pnl>=0?'+':'')+f(st.pnl);p.className=st.pnl>=0?'g':'r';
+ $('nt').textContent=st.n;$('wr').textContent=st.n?f(st.wr,1)+'%':'–';$('fees').textContent=f(s.fees);
+ $('dd').textContent=f(st.dd,1)+'%';$('pf').textContent=st.n?f(st.pf,2):'–';
+ $('btnRun').textContent=s.running?'⏸ Pauzeer':'▶ Start';
+ $('open').innerHTML=s.pos.map(p=>{const g=(p.last/p.entry-1)*100;
+  return`<tr><td>${p.sym}</td><td>${p.entry.toExponential(2)}</td><td>${p.last.toExponential(2)}</td><td class="${g>=0?'g':'r'}">${f(g,1)}%</td><td>${Math.round((Date.now()-p.t0)/1000)}s</td><td><button data-close="${p.m}">✕</button></td></tr>`}).join('')||'<tr><td colspan=6 style="color:var(--mut)">geen</td></tr>';
+ $('hist').innerHTML=s.hist.slice(0,15).map(x=>`<tr><td>${x.sym}</td><td class="${x.pnl>=0?'g':'r'}">${f(x.pnl,4)}</td><td>${f(x.pct,1)}%</td><td>${x.why}</td><td>${Math.round(x.dur)}s</td></tr>`).join('')||'<tr><td colspan=5 style="color:var(--mut)">nog geen trades</td></tr>';
+ $('log').textContent=s.logs.join('\n');
+ if(!cfgBuilt){cfgBuilt=true;$('cfg').innerHTML=Object.keys(s.def).map(k=>`<div><label>${LBL[k]||k}</label><input data-k="${k}" type="number" step="any" value="${s.cfg[k]}"></div>`).join('')}
+ gate(s);chart(s.eqHist,s.cfg.start);
+}
+function gate(s){
+ const st=s.stats,first=s.hist.length?s.hist[s.hist.length-1].t:Date.now();
+ const ok=[[st.n>=100,`Minstens 100 trades (${st.n})`],[st.pnl>0,`Netto positief na fees (${f(st.pnl)} SOL)`],
+  [st.pf>=1.3,`Profit factor ≥ 1.3 (${st.n?f(st.pf,2):'–'})`],[st.dd<=20,`Max drawdown ≤ 20% (${f(st.dd,1)}%)`],
+  [s.hist.length>0&&Date.now()-s.startedAt>=3*864e5,'Minstens 3 dagen paper data']];
+ $('gateList').innerHTML=ok.map(([o,t])=>`<li>${o?'✅':'⬜'} ${t}</li>`).join('');
+ const all=ok.every(x=>x[0]);$('btnLive').disabled=!all;$('btnLive').textContent=all?'🔓 Naar LIVE':'🔒 Naar LIVE';
+}
+function chart(d,start){
+ const c=$('chart'),r=devicePixelRatio||1;c.width=c.clientWidth*r;c.height=c.clientHeight*r;
+ const x=c.getContext('2d'),w=c.width,h=c.height;x.clearRect(0,0,w,h);if(d.length<2)return;
+ const mn=Math.min(...d,start),mx=Math.max(...d,start),sp=(mx-mn)||1,Y=v=>h-6-(v-mn)/sp*(h-12);
+ x.strokeStyle='#222a3a';x.beginPath();x.moveTo(0,Y(start));x.lineTo(w,Y(start));x.stroke();
+ x.strokeStyle=d[d.length-1]>=start?'#2ecc71':'#ff5c6c';x.lineWidth=2*r;x.beginPath();
+ d.forEach((v,i)=>{const px=i/(d.length-1)*w;i?x.lineTo(px,Y(v)):x.moveTo(px,Y(v))});x.stroke();
+}
+$('cfg').addEventListener('change',e=>{const k=e.target.dataset.k;if(k&&e.target.value!=='')post('/api/cfg',{[k]:+e.target.value})});
+document.addEventListener('click',e=>{const m=e.target.dataset&&e.target.dataset.close;if(m)post('/api/close',{mint:m}).then(poll)});
+$('btnRun').onclick=()=>post('/api/run',{running:!(last&&last.running)}).then(poll);
+$('btnReset').onclick=()=>{if(confirm('Alles resetten (balans, trades, posities)?'))post('/api/reset',{confirm:true}).then(()=>{cfgBuilt=false;poll()})};
+$('btnLive').onclick=()=>{$('liveMsg').textContent='Poort open, maar de LIVE-executor (aparte wallet) is nog niet gekoppeld.'};
+poll();setInterval(poll,2000);
+</script></body></html>
