@@ -29,6 +29,22 @@ Dashboard: http://127.0.0.1:3000 (alleen bereikbaar vanaf je eigen Mac).
 - Stoppen: `./uninstall-mac.sh` (data blijft staan)
 - Updaten: `git pull && ./install-mac.sh`
 
+### Dashboard op je iPhone
+
+Standaard is het dashboard alleen bereikbaar op de Mac zelf. Voor je iPhone zet je in `.env` een wachtwoord en open je de poort:
+
+```
+HOST=0.0.0.0
+DASH_TOKEN=kies-een-lang-willekeurig-wachtwoord
+```
+
+Daarna `./install-mac.sh` opnieuw draaien (of `launchctl kickstart -k gui/$(id -u)/com.flint.pumpbot`). **Zonder `DASH_TOKEN` negeert de bot `HOST` en blijft hij lokaal**, zodat je het nooit per ongeluk onbeveiligd openzet.
+
+- **Thuis, zelfde wifi:** open in Safari `http://<ip-van-je-mac>:3000/?key=<DASH_TOKEN>` (het ip: `ipconfig getifaddr en0`, of de naam `jouwmac.local`). Eenmalig: daarna onthoudt Safari je via een cookie.
+- **Overal (aanbevolen):** installeer [Tailscale](https://tailscale.com) op je Mac en je iPhone (gratis, zelfde account). Open dan `http://<mac-naam>:3000/?key=<DASH_TOKEN>`. Het verkeer is versleuteld en er wordt niets op het internet opengezet.
+- Zet de poort **nooit** via je router open naar het internet: de verbinding is gewoon http, en het dashboard kan instellingen wijzigen en de account resetten.
+- Tip: Safari → Deel → "Zet op beginscherm" geeft je een app-icoon. Het dashboard past zich aan een telefoonscherm aan.
+
 Let op: een MacBook met gesloten deksel gaat toch slapen. Laat hem open op de lader, of gebruik een Mac mini/iMac.
 Zonder internet of tijdens slaap ziet de bot geen prijzen; open posities worden dan na de stale-timeout gesloten.
 

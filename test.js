@@ -2,6 +2,7 @@
 // Simuleert token-levenscycli zonder netwerk en controleert de realistische sim + datalogging.
 const os = require('os'), fs = require('fs'), path = require('path'), assert = require('assert'), cp = require('child_process');
 process.env.DATA_DIR = path.join(os.tmpdir(), 'flint-test-' + process.pid);
+process.env.DASH_TOKEN = 'geheim-test';
 const B = require('./bot.js');
 const S = B.getS(), C = S.cfg;
 C.latMin = 0; C.latMax = 0; C.failBuy = 0; C.failSell = 0; // eerst deterministisch en synchroon
@@ -138,6 +139,29 @@ function heat(mint, tag, n = 6) { for (let i = 0; i < n; i++) buy(mint, tag + i,
   // 9) analyze.js draait zonder crash (met weinig data: nette melding)
   const out = cp.spawnSync('node', ['analyze.js'], { env: process.env, encoding: 'utf8' });
   assert(out.status === 0 && /te weinig data/i.test(out.stdout), 'analyze.js: ' + out.stdout + out.stderr);
+
+  // 10) Dashboard-wachtwoord: zonder cookie/sleutel wordt alles geweigerd (ook de gevaarlijke POSTs), met sleutel komt er een cookie
+  {
+    const http = require('http'), srv = B.server;
+    await new Promise(r => srv.listen(0, '127.0.0.1', r));
+    const port = srv.address().port;
+    const rq = (method, p, headers = {}, body) => new Promise(r => {
+      const q = http.request({ host: '127.0.0.1', port, method, path: p, headers }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => r({ code: res.statusCode, headers: res.headers, body: d })); });
+      if (body) q.write(body); q.end();
+    });
+    assert.strictEqual((await rq('GET', '/')).code, 401, 'dashboard zonder sleutel');
+    assert.strictEqual((await rq('GET', '/api/state')).code, 401, 'API zonder sleutel');
+    assert.strictEqual((await rq('GET', '/?key=fout')).code, 401, 'verkeerde sleutel');
+    const bal = S.bal;
+    assert.strictEqual((await rq('POST', '/api/reset', { 'Content-Type': 'application/json' }, '{"confirm":true}')).code, 401, 'reset zonder sleutel');
+    assert.strictEqual(B.getS().bal, bal, 'account mag niet gereset zijn');
+    const ok = await rq('GET', '/?key=geheim-test');
+    assert.strictEqual(ok.code, 302); const ck = (ok.headers['set-cookie'] || [''])[0];
+    assert(/^flint=geheim-test; .*HttpOnly.*SameSite=Strict/.test(ck), 'cookie: ' + ck);
+    assert.strictEqual((await rq('GET', '/api/state', { Cookie: 'flint=geheim-test' })).code, 200, 'met cookie');
+    assert.strictEqual((await rq('GET', '/api/state', { Cookie: 'flint=fout' })).code, 401, 'verkeerde cookie');
+    await new Promise(r => srv.close(r));
+  }
 
   console.log('OK, alle tests geslaagd. Balans:', S.bal.toFixed(4), '| mislukte orders:', S.failed);
   process.exit(0);

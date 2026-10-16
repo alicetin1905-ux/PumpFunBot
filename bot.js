@@ -24,6 +24,7 @@ const RPC_WSS = process.env.RPC_WSS || 'wss://api.mainnet-beta.solana.com';
 
 const PORT = +process.env.PORT || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
+const DASH_TOKEN = process.env.DASH_TOKEN || '';   // wachtwoord voor het dashboard; verplicht zodra HOST niet alleen-lokaal is
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SIM_VERSION = 2;
@@ -452,9 +453,26 @@ function readBody(req, cb) {
   let b = ''; req.on('data', c => { b += c; if (b.length > 1e5) req.destroy(); });
   req.on('end', () => { try { cb(JSON.parse(b || '{}')); } catch { cb(null); } });
 }
+/* Toegangscontrole (alleen actief met DASH_TOKEN): cookie `flint`, of eenmalig ?key=… in de URL (zet dan de cookie). */
+const sha = x => require('crypto').createHash('sha256').update(String(x)).digest();
+const sameToken = x => !!DASH_TOKEN && require('crypto').timingSafeEqual(sha(x), sha(DASH_TOKEN));
+const cookieOf = req => { const m = /(?:^|;\s*)flint=([^;]+)/.exec(req.headers.cookie || ''); try { return m ? decodeURIComponent(m[1]) : ''; } catch { return ''; } };
+function gate(req, res) {
+  if (!DASH_TOKEN) return true;
+  if (sameToken(cookieOf(req))) return true;
+  const key = new URL(req.url, 'http://x').searchParams.get('key');
+  if (req.method === 'GET' && key && sameToken(key)) {
+    res.writeHead(302, { 'Set-Cookie': `flint=${encodeURIComponent(DASH_TOKEN)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`, Location: '/' });
+    res.end(); return false;
+  }
+  res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('Toegang geweigerd. Open het dashboard met de link http://<adres>:' + PORT + '/?key=<DASH_TOKEN>');
+  return false;
+}
 const json = (res, o, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
 
 const server = http.createServer((req, res) => {
+  if (!gate(req, res)) return;
   const u = req.url.split('?')[0];
   if (req.method === 'GET') {
     if (u === '/' || u === '/index.html') {
@@ -496,7 +514,12 @@ const server = http.createServer((req, res) => {
 
 function start() {
   load(); loadRegistry(); pruneData();
-  server.listen(PORT, HOST, () => log(`dashboard: http://${HOST}:${PORT}`));
+  let host = HOST;
+  if (!/^(127\.|localhost$|::1$)/.test(host) && !DASH_TOKEN) {
+    log(`HOST=${host} is bereikbaar voor anderen, maar DASH_TOKEN ontbreekt: dashboard blijft alleen lokaal (127.0.0.1). Zet DASH_TOKEN in .env.`);
+    host = '127.0.0.1';
+  }
+  server.listen(PORT, host, () => log(`dashboard: http://${host}:${PORT}${DASH_TOKEN ? ' (met wachtwoord)' : ''}`));
   if (process.env.DEMO) { connected = true; log('DEMO-modus: gesimuleerde tokens, geen echte feed'); require('./demo.js').start(handle); }
   else connect();
   setInterval(tick, 1000);
@@ -512,4 +535,4 @@ function start() {
 }
 
 if (require.main === module) start();
-module.exports = { handle, tick, REG, registryUpdate, saveRegistry, loadRegistry, isSmart, evaluate, close, checkEntry, finalize, flushData, getS: () => S, T, DEF, DATA_DIR };
+module.exports = { server, handle, tick, REG, registryUpdate, saveRegistry, loadRegistry, isSmart, evaluate, close, checkEntry, finalize, flushData, getS: () => S, T, DEF, DATA_DIR };
