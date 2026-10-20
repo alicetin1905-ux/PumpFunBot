@@ -54,4 +54,32 @@ assert(/strategie-scan/.test(sc.stdout) && /combinaties getest/.test(sc.stdout) 
   assert(!/✔ bevestigd/.test(nl.stdout), 'nulproef: scan vond een strategie in pure ruis:\n' + nl.stdout);
   assert(/Geen enkele gekozen combinatie houdt stand/.test(nl.stdout), 'nulproef: verwacht geen-edge-conclusie:\n' + nl.stdout.slice(-600));
 }
+
+// wallets.js: drie echt slimme wallets (tokens waar zij vroeg zitten stijgen) tussen 80 ruiswallets.
+// Verwacht: de drie worden gevonden en op de test bevestigd; geen enkele ruiswallet wordt bevestigd.
+{
+  const F = require('./feed-solana.js'), crypto = require('crypto');
+  const d3 = path.join(os.tmpdir(), 'flint-wallets-' + process.pid); fs.mkdirSync(d3, { recursive: true });
+  const key = () => crypto.randomBytes(32).toString('hex');
+  const smart = [key(), key(), key()], noise = Array.from({ length: 80 }, key), ls = [];
+  for (let i = 0; i < 1500; i++) {
+    const early = [], sm = smart.filter(() => rnd() < 0.08);
+    for (const w of sm) early.push([w, 4 + Math.floor(rnd() * 20), 0.5]);
+    for (let k = 0; k < 3; k++) { const w = noise[Math.floor(rnd() * noise.length)]; if (!early.find(e => e[0] === w)) early.push([w, 4 + Math.floor(rnd() * 20), 0.5]); }
+    const drift = sm.length ? 0.016 : -0.0015, pp = [30];
+    for (let k = 1; k < 130; k++) pp.push(Math.max(1, pp[k - 1] * (1 + drift + 0.02 * gauss())));
+    ls.push(JSON.stringify({ id: 'W' + i, t0: base + i * 60000, step: 2, m0: 30, peak: Math.max(...pp), early, snaps: [], path: pp.map(x => +x.toFixed(2)), devSoldAt: null }));
+  }
+  fs.writeFileSync(path.join(d3, 'tokens-2026-01-01.jsonl'), ls.join('\n') + '\n');
+  const wr = cp.spawnSync('node', [path.join(__dirname, 'wallets.js')], { env: { ...process.env, DATA_DIR: d3 }, encoding: 'utf8' });
+  assert.strictEqual(wr.status, 0, wr.stderr);
+  const sp = smart.map(h => F.b58encode(Buffer.from(h, 'hex')));
+  for (const a of sp) { const blk = wr.stdout.split(a)[1] || ''; assert(/✔ bevestigd/.test(blk.split('\n\n')[0] + blk.split('\n').slice(0, 3).join('\n')), 'slimme wallet niet bevestigd: ' + a + '\n' + wr.stdout); }
+  assert.strictEqual((wr.stdout.match(/✔ bevestigd/g) || []).length, 3, 'alleen de 3 slimme wallets mogen bevestigd zijn:\n' + wr.stdout);
+  assert(/WATCH_WALLETS=w1=/.test(wr.stdout) && sp.every(a => wr.stdout.includes(a)), 'WATCH_WALLETS-regel');
+  // te weinig data: nette melding
+  const d4 = path.join(os.tmpdir(), 'flint-wallets-leeg-' + process.pid); fs.mkdirSync(d4, { recursive: true });
+  const e = cp.spawnSync('node', [path.join(__dirname, 'wallets.js')], { env: { ...process.env, DATA_DIR: d4 }, encoding: 'utf8' });
+  assert(e.status === 0 && /te weinig data/i.test(e.stdout));
+}
 console.log('OK, analyze-test geslaagd');

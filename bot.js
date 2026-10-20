@@ -94,7 +94,7 @@ function registryUpdate(t) {
   if (t.regDone) return; t.regDone = true;
   const now = Date.now(), win = t.m0 > 0 && t.peak >= t.m0 * WIN_MULT;
   const cr = REG.creators.get(wid(t.creator)); if (cr && t.devSold) { cr[1]++; cr[2] = now; }
-  for (const w of t.early) {
+  for (const w of t.early.keys()) {
     const k = wid(w), r = REG.wallets.get(k) || [0, 0, 0];
     r[0]++; if (win) r[1]++; r[2] = now; REG.wallets.set(k, r);
   }
@@ -183,7 +183,7 @@ function finalize(t) {
   registryUpdate(t);
   const c = S.cfg; if (!c.logTokens) return;
   if (t.buyers.size < c.logMinBuyers && !t.traded) { S.logSkipped++; return; }
-  const rec = { id: t.m, sym: t.sym, t0: t.t0, vSol0: r2(t.v0 || 0), watch: t.watch.length ? t.watch : undefined, devBuy: r2(t.devBuy), step: STEP_MS / 1000, snaps: t.snaps, path: t.path,
+  const rec = { id: t.m, sym: t.sym, t0: t.t0, vSol0: r2(t.v0 || 0), m0: r1(t.m0), early: [...t.early].map(([w, v]) => [w, v.age, v.sol]), watch: t.watch.length ? t.watch : undefined, devBuy: r2(t.devBuy), step: STEP_MS / 1000, snaps: t.snaps, path: t.path,
     peak: r1(t.peak), peakAge: r1(t.peakAge || 0), devSoldAt: t.devSoldAt, final: feats(t), trade: t.trade || null };
   tokenBuf.push({ day: new Date(t.t0).toISOString().slice(0, 10), line: JSON.stringify(rec) });
   S.logSaved++; save();
@@ -218,7 +218,7 @@ function newTok(m, sym, creator, p, mcap, vSol, vTok, t0, devBuy) {
   return { m, sym, t0, creator, p0: p, p, vSol, vTok, v0: vSol, feePct: null, mcap, peak: mcap, peakAge: 0, buyers: new Set(), sellers: new Set(), buyBy: new Map(),
     recent: [], buyVol: 0, sellVol: 0, nTrades: 0, nBuys: 0, nSells: 0, devSold: false, devSoldAt: null, devBuy: devBuy || 0,
     last: Date.now(), path: [], snaps: [], snapIdx: 0, traded: false, pendingBuy: false, trade: null,
-    watch: [], m0: mcap, slot0: null, snipers: new Set(), sniperVol: 0, early: new Set(), devN: 0, devRugs: 0, regDone: false };
+    watch: [], m0: mcap, slot0: null, snipers: new Set(), sniperVol: 0, early: new Map(), devN: 0, devRugs: 0, regDone: false };
 }
 
 function connectSolana() {
@@ -297,7 +297,7 @@ function handle(d) {
   } else if (d.txType === 'buy') {
     t.nBuys++; t.buyVol += sol; t.buyers.add(who); t.buyBy.set(who, (t.buyBy.get(who) || 0) + sol);
     if (t.slot0 != null && d.slot != null && d.slot - t.slot0 <= SNIPE_SLOTS) { t.snipers.add(who); t.sniperVol += sol; }
-    if (t.early.size < EARLY_MAX && now - t.t0 <= EARLY_SECS * 1000) t.early.add(who);
+    if (t.early.size < EARLY_MAX && !t.early.has(who) && now - t.t0 <= EARLY_SECS * 1000) t.early.set(who, { age: r1((now - t.t0) / 1000), sol: r2(sol) });
     t.recent.push({ ts: now, sol, b: 1 });
   } else if (d.txType === 'sell') {
     t.nSells++; t.sellVol += sol; t.sellers.add(who); t.recent.push({ ts: now, sol, b: 0 });

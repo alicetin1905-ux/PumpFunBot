@@ -131,6 +131,13 @@ Het zegt ook hoeveel combinaties het geprobeerd heeft en wat de gemiddelde combi
 dan is er in die data geen aangetoonde edge en levert aan TP/SL draaien alleen toeval op. De snapshots lopen nu tot 300 s; zet voor langere strategieën
 "LOG HORIZON S" op bv. 480 (meer geheugen, max 600 gevolgde tokens).
 
+### Slimme wallets vinden: `npm run wallets`
+
+Elk token legt nu zijn vroege kopers (eerste 30 s, max. 20, met volledig adres, leeftijd en bedrag) vast. `node wallets.js` zoekt op het eerste deel van de tijd wallets
+die vaker dan toeval vroeg in tokens zaten die minstens verdubbelden, en test op het latere deel wat copy-trading met die wallets had opgeleverd (instap bij hun koop,
+vaste uitstap, alle kosten, interval gecorrigeerd voor het aantal kandidaten). Wallets die alleen in de trainperiode slim leken vallen daar vanzelf af. Bevestigde wallets
+krijg je als kant-en-klare `WATCH_WALLETS=…`-regel om live te laten loggen en op nieuwe data opnieuw te bevestigen. Het werkt pas met een paar honderd tokens uit de nieuwste versie.
+
 ## Wallets volgen (watchlist)
 
 Zet in `.env`: `WATCH_WALLETS=jaap=<adres>,<adres2>` (optioneel met naam). De bot legt dan vast wanneer zo'n wallet een gevolgd token koopt of verkoopt
