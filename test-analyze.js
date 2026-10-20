@@ -30,4 +30,27 @@ assert(/verschil -\d/.test(hyp) && /significant/.test(hyp), 'sniper-effect moet 
 assert(/devRugs ≥ 1/.test(sec) && /niet te onderscheiden van toeval/.test(sec.split('devRugs')[1]), 'ruis-kenmerk (devRugs) mag niet significant lijken:\n' + sec);
 // de kostenbewuste ± staat in de uitvoer
 assert(/±\d/.test(t));
+
+// scan.js draait op dezelfde data en rapporteert de structuur (train/test, gecorrigeerd interval, context)
+const sc = cp.spawnSync('node', [path.join(__dirname, 'scan.js'), '--minn=20'], { env: { ...process.env, DATA_DIR: dir }, encoding: 'utf8' });
+assert.strictEqual(sc.status, 0, sc.stderr);
+assert(/strategie-scan/.test(sc.stdout) && /combinaties getest/.test(sc.stdout) && /Context: van alle/.test(sc.stdout), 'scan-uitvoer:\n' + sc.stdout);
+
+// Nulproef: tokens zonder enig voorspellend effect (zuivere willekeurige wandeling, kosten maken ze negatief).
+// De scan mag hier geen enkele combinatie "bevestigd" noemen.
+{
+  const d2 = path.join(os.tmpdir(), 'flint-scan-null-' + process.pid); fs.mkdirSync(d2, { recursive: true });
+  const ls = [];
+  for (let i = 0; i < 900; i++) {
+    const pp = [30]; for (let k = 1; k < 240; k++) pp.push(Math.max(1, pp[k - 1] * (1 + 0.025 * gauss())));
+    const f = age => ({ age, buyers: 4 + Math.floor(rnd() * 25), sellers: 2, buyVol: 1 + rnd() * 6, sellVol: 0.5, nBuys: 10, nSells: 3, ratio: 1 + rnd() * 8, mcap: 28 + rnd() * 40,
+      run: rnd() * 30, devSold: 0, devBuy: 0.5, topShare: rnd(), buys10: rnd() * 3, sells10: 0.2, mom: rnd() - 0.4, snipers: 1, sniperShare: rnd(), organic: Math.floor(rnd() * 15), devN: 0, devRugs: 0, smart: 0 });
+    ls.push(JSON.stringify({ id: 'N' + i, t0: base + i * 60000, step: 2, snaps: [f(20), f(45), f(90), f(180)], path: pp.map(x => +x.toFixed(2)), devSoldAt: null }));
+  }
+  fs.writeFileSync(path.join(d2, 'tokens-2026-01-01.jsonl'), ls.join('\n') + '\n');
+  const nl = cp.spawnSync('node', [path.join(__dirname, 'scan.js'), '--minn=30'], { env: { ...process.env, DATA_DIR: d2 }, encoding: 'utf8' });
+  assert.strictEqual(nl.status, 0, nl.stderr);
+  assert(!/✔ bevestigd/.test(nl.stdout), 'nulproef: scan vond een strategie in pure ruis:\n' + nl.stdout);
+  assert(/Geen enkele gekozen combinatie houdt stand/.test(nl.stdout), 'nulproef: verwacht geen-edge-conclusie:\n' + nl.stdout.slice(-600));
+}
 console.log('OK, analyze-test geslaagd');

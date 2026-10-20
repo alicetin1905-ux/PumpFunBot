@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node bot.js",
     "test": "node test.js && node test-feed.js && node test-analyze.js",
-    "analyze": "node analyze.js"
+    "analyze": "node analyze.js",
+    "scan": "node scan.js"
   },
   "engines": {
     "node": ">=18"

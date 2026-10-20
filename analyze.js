@@ -13,7 +13,7 @@
    3. Vooraf bepaalde hypothesen over wallet-/bundelsignalen (geen datamining, dus eerlijk te lezen)
    4. Beste filter per kenmerk en combinaties (train 70% / test 30% in tijd)
    Een resultaat telt pas als het ook op onbekende (latere) tokens standhoudt; het ± is het 95%-betrouwbaarheidsinterval. */
-const fs = require('fs'), path = require('path');
+const path = require('path');
 const DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const args = Object.fromEntries(process.argv.slice(2).map(a => a.replace(/^--/, '').split('=')));
 const num = (k, d) => (args[k] !== undefined && args[k] !== '' && !isNaN(+args[k])) ? +args[k] : d;
@@ -24,35 +24,19 @@ const C = { fee: num('fee', 1.25) / 100, slip: num('slip', 1) / 100, impact: num
 const PRIO_RT = 2 * PRIO / SIZE;                                   // priority fee, beide kanten, als deel van de positie
 const COST_RT = 2 * (C.fee + C.slip + C.impact) + PRIO_RT;         // ongeveer, voor de break-even-berekening
 
-const files = fs.existsSync(DIR) ? fs.readdirSync(DIR).filter(f => /^tokens-.*\.jsonl$/.test(f)).sort() : [];
-const recs = [];
-for (const f of files) for (const l of fs.readFileSync(path.join(DIR, f), 'utf8').split('\n')) {
-  if (!l.trim()) continue; try { recs.push(JSON.parse(l)); } catch { /* beschadigde regel */ }
-}
+const { loadRecs, isCustom, makeSim, stat } = require('./simlib.js');
+const recs = loadRecs(DIR);
+const M = makeSim({ fee: C.fee * 100, slip: C.slip * 100, impact: C.impact * 100, prio: PRIO, size: SIZE, lat: LAT });
 
-/* Netto rendement van één token bij gegeven uitstapregels (zelfde volgorde van checks als de bot). */
-function sim(r, s, o) {
-  const step = r.step || 2, p = r.path || [];
-  const i0 = Math.ceil((s.age + LAT) / step);
-  if (i0 >= p.length - 1 || !(p[i0] > 0)) return null;
-  const entry = p[i0] * (1 + C.impact + C.slip);
-  const iMax = Math.min(p.length - 1, i0 + Math.floor((o.hold || HOLD) / step));
-  const iDev = r.devSoldAt != null ? Math.ceil((r.devSoldAt + LAT) / step) : Infinity;
-  let exit = p[iMax], peak = p[i0];
-  for (let i = i0 + 1; i <= iMax; i++) {
-    if (p[i] > peak) peak = p[i];
-    const g = (p[i] / entry - 1) * 100, pk = (peak / entry - 1) * 100;
-    if (i >= iDev || g >= o.tp || g <= -o.sl || (o.trail > 0 && pk >= o.trailStart && p[i] <= peak * (1 - o.trail / 100))) { exit = p[i]; break; }
-  }
-  return ((1 - C.fee) / entry) * exit * (1 - C.impact - C.slip) * (1 - C.fee) - 1 - PRIO_RT;
-}
+/* Netto rendement van één token (zie simlib.js); o = { tp, sl, hold, trail, trailStart } */
+const sim = (r, s, o) => M.sim(r, s, { ...o, hold: o.hold || HOLD });
 const BASE = { tp: TP, sl: SL, hold: HOLD, trail: TRAIL0.pct, trailStart: TRAIL0.start };
 
 // Tokens met een eigen startcurve (CreateV2, vSol0 ≠ 30 SOL) hebben andere mcap-/prijsschalen: apart houden, niet meetellen.
-const custom = recs.filter(r => r.vSol0 > 0 && Math.abs(r.vSol0 - 30) > 0.5).length;
+const custom = recs.filter(isCustom).length;
 const rows = [];
 for (const r of recs) {
-  if (r.vSol0 > 0 && Math.abs(r.vSol0 - 30) > 0.5) continue;
+  if (isCustom(r)) continue;
   const s = (r.snaps || []).reduce((b, x) => (!b || Math.abs(x.age - AGE) < Math.abs(b.age - AGE)) ? x : b, null);
   if (!s || Math.abs(s.age - AGE) > 4) continue;
   const ret = sim(r, s, BASE);
@@ -62,12 +46,6 @@ rows.sort((a, b) => a.t0 - b.t0);
 
 const pct = n => (n * 100).toFixed(1) + '%';
 const spct = n => (n >= 0 ? '+' : '') + (n * 100).toFixed(1) + '%';
-function stat(rs, key = 'ret') {
-  const n = rs.length; if (!n) return { n: 0, win: 0, avg: 0, ci: 0 };
-  const avg = rs.reduce((a, x) => a + x[key], 0) / n;
-  const sd = n > 1 ? Math.sqrt(rs.reduce((a, x) => a + (x[key] - avg) ** 2, 0) / (n - 1)) : 0;
-  return { n, win: rs.filter(x => x[key] > 0).length / n, avg, ci: 1.96 * sd / Math.sqrt(n) };
-}
 const line = (label, s) => `${label.padEnd(34)} n=${String(s.n).padStart(5)}  winst ${pct(s.win).padStart(6)}  gem. netto/trade ${spct(s.avg).padStart(7)} ±${(s.ci * 100).toFixed(1)}`;
 const breakEven = rs => {
   const w = rs.filter(x => x.ret > 0), l = rs.filter(x => x.ret <= 0);

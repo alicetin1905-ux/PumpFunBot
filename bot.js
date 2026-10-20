@@ -28,7 +28,7 @@ const DASH_TOKEN = process.env.DASH_TOKEN || '';   // wachtwoord voor het dashbo
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const SIM_VERSION = 2;
-const SNAPS = [5, 10, 15, 20, 30, 45, 60];   // seconden na creatie waarop features worden vastgelegd
+const SNAPS = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 300];   // seconden na creatie waarop features worden vastgelegd
 const STEP_MS = 2000;                        // resolutie van het prijspad
 const MAX_TRACKED = 600;
 

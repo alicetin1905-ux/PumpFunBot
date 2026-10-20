@@ -128,7 +128,7 @@ function heat(mint, tag, n = 6) { for (let i = 0; i < n; i++) buy(mint, tag + i,
   assert(f.length === 1, 'één dagbestand verwacht');
   const lines = fs.readFileSync(path.join(process.env.DATA_DIR, f[0]), 'utf8').trim().split('\n').map(JSON.parse);
   const rec = lines.find(x => x.id === 'WIN');
-  assert(rec && rec.snaps.length === 7 && rec.path.length > 10 && rec.trade && rec.trade.why === 'TP', 'dataset-record van WIN klopt niet');
+  assert(rec && rec.snaps.length >= 7 && rec.path.length > 10 && rec.trade && rec.trade.why === 'TP', 'dataset-record van WIN klopt niet');
   assert(fs.existsSync(path.join(process.env.DATA_DIR, 'trades.jsonl')), 'trades.jsonl verwacht');
 
   // 8) Boekhouding klopt: balans = start + som pnl - verloren fees van mislukte orders

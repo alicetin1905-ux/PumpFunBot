@@ -123,6 +123,14 @@ Het register staat in `data/wallets.json` (max. 50k makers / 150k wallets, oudst
 dus er lekt niets vooruit. De sniper-check heeft slot-data nodig en werkt dus alleen met de Solana-feed (`FEED=solana`). Pas een filter pas aan als
 sectie 3 van `npm run analyze` een significant effect laat zien op genoeg tokens.
 
+### Nieuwe strategie zoeken: `npm run scan`
+
+`node scan.js` test een vaste set strategieën (4 entry-leeftijden × 6 entry-filters × 48 uitstapregels) op je verzamelde tokens, met dezelfde kosten als `analyze.js`.
+Het kiest de beste combinaties op de eerste 60% van de tijd, meet ze op de laatste 40% en corrigeert het interval voor het aantal gekozen combinaties.
+Het zegt ook hoeveel combinaties het geprobeerd heeft en wat de gemiddelde combinatie op de test doet. Vindt het niets dat standhoudt, dan meldt het dat eerlijk:
+dan is er in die data geen aangetoonde edge en levert aan TP/SL draaien alleen toeval op. De snapshots lopen nu tot 300 s; zet voor langere strategieën
+"LOG HORIZON S" op bv. 480 (meer geheugen, max 600 gevolgde tokens).
+
 ## Strategie
 
 - **Instap:** genoeg unieke kopers, koopvolume en koop/verkoop-ratio, mcap binnen een bereik, token niet al te ver gestegen, dev heeft niet verkocht.
