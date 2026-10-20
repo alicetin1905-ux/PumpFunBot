@@ -32,9 +32,17 @@ cat > "$PLIST" <<EOF
 </dict></plist>
 EOF
 
-launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
-launchctl kickstart -k "gui/$(id -u)/$LABEL"
+DOMAIN="gui/$(id -u)"
+launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+# Wacht tot de oude dienst echt weg is; direct opnieuw laden geeft anders "Bootstrap failed: 5: Input/output error".
+for i in 1 2 3 4 5 6 7 8 9 10; do launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break; sleep 1; done
+ok=0
+for i in 1 2 3; do
+  if launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null; then ok=1; break; fi
+  sleep 2
+done
+[ "$ok" = 1 ] || launchctl bootstrap "$DOMAIN" "$PLIST"   # laatste poging: laat de echte foutmelding zien
+launchctl kickstart -k "$DOMAIN/$LABEL"
 
 echo
 echo "FLINT draait nu op de achtergrond."
