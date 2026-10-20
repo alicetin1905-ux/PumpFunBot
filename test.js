@@ -3,6 +3,8 @@
 const os = require('os'), fs = require('fs'), path = require('path'), assert = require('assert'), cp = require('child_process');
 process.env.DATA_DIR = path.join(os.tmpdir(), 'flint-test-' + process.pid);
 process.env.DASH_TOKEN = 'geheim-test';
+const FEEDLIB = require('./feed-solana.js'), WALLET_B58 = FEEDLIB.b58encode(Buffer.alloc(32, 7)), WALLET_HEX = Buffer.alloc(32, 7).toString('hex');
+process.env.WATCH_WALLETS = 'tst=' + WALLET_B58 + ',kapot=abc';
 const B = require('./bot.js');
 const S = B.getS(), C = S.cfg;
 C.latMin = 0; C.latMax = 0; C.failBuy = 0; C.failSell = 0; // eerst deterministisch en synchroon
@@ -82,6 +84,19 @@ function heat(mint, tag, n = 6) { for (let i = 0; i < n; i++) buy(mint, tag + i,
     // register overleeft herstart
     B.saveRegistry(); const nW = B.REG.wallets.size; B.REG.wallets.clear(); B.REG.creators.clear(); B.loadRegistry();
     assert.strictEqual(B.REG.wallets.size, nW); assert(B.isSmart('smartW0'));
+  }
+
+  // 2d) Watchlist: wallet in beide vormen (hex van de Solana-feed, base58 van PumpPortal) wordt herkend en vastgelegd
+  {
+    assert.strictEqual(B.WATCH.get(WALLET_HEX), 'tst'); assert.strictEqual(B.WATCH.get(WALLET_B58), 'tst'); assert(!B.WATCH.has('abc'), 'kapot adres genegeerd');
+    B.handle({ txType: 'create', mint: 'WCH', symbol: 'WCH', traderPublicKey: 'devWCH', solAmount: 0, vSolInBondingCurve: 30, vTokensInBondingCurve: 1e9, marketCapSol: 30 });
+    const wt = B.T.get('WCH'); wt.t0 -= 12000;
+    const wb = (who, tx, sol, vSol) => B.handle({ txType: tx, mint: 'WCH', traderPublicKey: who, solAmount: sol, vSolInBondingCurve: vSol, vTokensInBondingCurve: 1e9, marketCapSol: vSol });
+    wb(WALLET_HEX, 'buy', 2, 31); wb(WALLET_B58, 'buy', 1, 31.5); wb('anders', 'buy', 0.5, 31.6); wb(WALLET_HEX, 'sell', 3, 31.2);
+    assert.strictEqual(wt.watch.length, 3, 'drie events van de gevolgde wallet, niet van anderen');
+    assert(wt.watch[0].age >= 12 && wt.watch[0].side === 'buy' && wt.watch[0].sol === 2 && wt.watch[2].side === 'sell');
+    C.minWatched = 1; assert(B.evaluate(wt).checks.find(x => x.k === 'watched').ok, 'watch-filter ziet de wallet'); C.minWatched = 0;
+    assert.strictEqual(B.evaluate(wt).checks.length, 7, 'filter staat standaard uit');
   }
 
   // 3) Dev verkoopt -> geen instap; te weinig kopers -> geen instap

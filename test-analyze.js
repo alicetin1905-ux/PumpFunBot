@@ -12,7 +12,7 @@ for (let i = 0; i < 700; i++) {
   const f = age => ({ age, buyers: 6 + Math.floor(rnd() * 15), sellers: 2, buyVol: 2 + rnd() * 4, sellVol: 0.5, nBuys: 10, nSells: 3, ratio: 3 + rnd() * 5, mcap: 28 + rnd() * 25,
     run: rnd() * 30, devSold: 0, devBuy: 0.5, topShare: 0.3, buys10: 1, sells10: 0.2, mom: 0.8,
     snipers: sniper ? 5 : 1, sniperShare: sniper ? 0.7 : 0.1, organic: sniper ? 2 : 8, devN: 0, devRugs: i % 10 === 0 ? 1 : 0, smart: i % 7 === 0 ? 1 : 0 });
-  lines.push(JSON.stringify({ id: 'T' + i, sym: 'T' + i, t0: base + i * 60000, step: 2, snaps: [f(5), f(10), f(20), f(30)], path: path_.map(x => +x.toFixed(2)),
+  lines.push(JSON.stringify({ id: 'T' + i, sym: 'T' + i, t0: base + i * 60000, step: 2, snaps: [f(5), f(10), f(20), f(30)], watch: i % 12 === 0 ? [{ w: 'jaap', side: 'buy', age: 20, sol: 1, mcap: 30 }] : undefined, path: path_.map(x => +x.toFixed(2)),
     peak: Math.max(...path_), devSoldAt: null, final: f(60), trade: null }));
 }
 const cust = JSON.parse(lines[0]); cust.id = 'CUSTOM'; cust.vSol0 = 0.4; lines.push(JSON.stringify(cust));
@@ -28,6 +28,7 @@ const sec = t.split('== 3.')[1].split('== 4.')[0];
 const hyp = sec.split('sniperShare ≥ 0.5')[1].split('organic')[0];
 assert(/verschil -\d/.test(hyp) && /significant/.test(hyp), 'sniper-effect moet significant negatief zijn:\n' + hyp);
 assert(/devRugs ≥ 1/.test(sec) && /niet te onderscheiden van toeval/.test(sec.split('devRugs')[1]), 'ruis-kenmerk (devRugs) mag niet significant lijken:\n' + sec);
+assert(/Gevolgde wallets/.test(t) && /jaap \(59 tokens gekocht\)/.test(t), 'watchlist-sectie:\n' + t.slice(-900));
 // de kostenbewuste ± staat in de uitvoer
 assert(/±\d/.test(t));
 

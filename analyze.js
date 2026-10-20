@@ -32,6 +32,23 @@ const M = makeSim({ fee: C.fee * 100, slip: C.slip * 100, impact: C.impact * 100
 const sim = (r, s, o) => M.sim(r, s, { ...o, hold: o.hold || HOLD });
 const BASE = { tp: TP, sl: SL, hold: HOLD, trail: TRAIL0.pct, trailStart: TRAIL0.start };
 
+/* ---- gevolgde wallets (copy-trade): instap op het moment van hun eerste koop in een token (+ vertraging), per wallet ---- */
+function printWatch() {
+  const ev = [];
+  for (const r of recs) {
+    if (isCustom(r) || !r.watch) continue;
+    const seen = new Set();
+    for (const e of r.watch) if (e.side === 'buy' && !seen.has(e.w)) { seen.add(e.w); ev.push({ w: e.w, t0: r.t0, r, age: e.age }); }
+  }
+  if (!ev.length) return;
+  console.log('\n== Gevolgde wallets (copy-trade: instap bij hun eerste koop per token, +' + LAT + 's vertraging, alle kosten) ==');
+  for (const w of [...new Set(ev.map(x => x.w))]) {
+    const mine = ev.filter(x => x.w === w), rs = mine.map(x => ({ ret: sim(x.r, { age: x.age }, BASE) })).filter(x => x.ret != null);
+    const st = stat(rs);
+    console.log(line(`${w} (${mine.length} tokens gekocht)`, st) + (st.n < 30 ? '   ← te weinig voor een conclusie (n < 30)' : ''));
+  }
+}
+
 // Tokens met een eigen startcurve (CreateV2, vSol0 ≠ 30 SOL) hebben andere mcap-/prijsschalen: apart houden, niet meetellen.
 const custom = recs.filter(isCustom).length;
 const rows = [];
@@ -58,6 +75,7 @@ console.log(`\nFLINT analyse — ${recs.length} tokens vastgelegd${custom ? ` ($
 console.log(`Uitstap: TP ${TP}% / SL ${SL}% / trailing ${TRAIL0.pct > 0 ? TRAIL0.start + '→' + TRAIL0.pct + '%' : 'uit'} / max ${HOLD}s`);
 if (rows.length < MINN * 3) {
   console.log(`Nog te weinig data (${rows.length} rijen, minimaal ~${MINN * 3}). Laat de bot langer draaien en probeer opnieuw.\n`);
+  printWatch(); // watchlist heeft eigen data en staat los van de drempel hierboven
   process.exit(0);
 }
 
@@ -175,5 +193,6 @@ for (const x of ranked) {
   console.log('   ' + line('train', x.tr)); console.log('   ' + line('test ', x.te));
 }
 
+printWatch();
 console.log('\nLet op: een combinatie telt pas als de TEST-regel positief is mét een interval boven 0. Hoe meer je zoekt, hoe vaker');
 console.log('je toeval vindt; verifieer met nieuwe data voordat je filters of TP/SL aanpast.\n');

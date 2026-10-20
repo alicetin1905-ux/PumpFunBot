@@ -40,7 +40,7 @@ const DEF = {
   latMin: 300, latMax: 900, failBuy: 8, failSell: 5, staleHaircut: 15,
   logTokens: 1, logMinBuyers: 3, logHorizon: 180, keepDays: 10,
   // Optionele filters op wallet-/bundelsignalen (uit = 100 / 0 / 99 / 0); zie README
-  maxSniperShare: 100, minOrganic: 0, maxDevRugs: 99, minSmart: 0
+  maxSniperShare: 100, minOrganic: 0, maxDevRugs: 99, minSmart: 0, minWatched: 0
 };
 
 const fresh = () => ({
@@ -118,6 +118,21 @@ function saveRegistry() {
   } catch (e) { log('register schrijven mislukt: ' + e.message); }
 }
 
+/* ---------- watchlist ----------
+   WATCH_WALLETS in .env: komma-gescheiden adressen, optioneel met naam (`naam=adres`). De bot legt vast wanneer zo'n wallet een gevolgd
+   token koopt of verkoopt (leeftijd, bedrag) in het datasetrecord (`watch`), telt ze als kenmerk `watched` en kan er optioneel op filteren.
+   Alleen lezen en loggen; er wordt niets gekocht omdat zij kopen. De feed geeft wallets als hex (Solana-feed) of base58 (PumpPortal): beide vormen. */
+const WATCH = new Map();
+for (const part of String(process.env.WATCH_WALLETS || '').split(',').map(x => x.trim()).filter(Boolean)) {
+  const [name, addr] = part.includes('=') ? part.split('=').map(x => x.trim()) : [null, part];
+  try {
+    const hex = require('./feed-solana.js').b58decode(addr).toString('hex');
+    if (hex.length !== 64) throw new Error('geen 32-byte adres');
+    const label = name || addr.slice(0, 4) + '…' + addr.slice(-4);
+    WATCH.set(addr, label); WATCH.set(hex, label);
+  } catch (e) { console.log(`WATCH_WALLETS: "${part}" overgeslagen (${e.message})`); }
+}
+
 /* ---------- datalogging ---------- */
 function flushData() {
   if (!tokenBuf.length && !tradeBuf.length) return;
@@ -160,14 +175,15 @@ function feats(t) {
     run: r1((t.p / t.p0 - 1) * 100), devSold: t.devSold ? 1 : 0, devBuy: r2(t.devBuy),
     topShare: t.buyVol ? r2(top / t.buyVol) : 0, buys10: r2(b10), sells10: r2(s10), mom: r2(b10 - s10),
     snipers: t.snipers.size, sniperShare: t.buyVol ? r2(t.sniperVol / t.buyVol) : 0, organic: t.buyers.size - t.snipers.size,
-    devN: t.devN, devRugs: t.devRugs, smart
+    devN: t.devN, devRugs: t.devRugs, smart,
+    watched: new Set(t.watch.filter(x => x.side === 'buy').map(x => x.w)).size
   };
 }
 function finalize(t) {
   registryUpdate(t);
   const c = S.cfg; if (!c.logTokens) return;
   if (t.buyers.size < c.logMinBuyers && !t.traded) { S.logSkipped++; return; }
-  const rec = { id: t.m, sym: t.sym, t0: t.t0, vSol0: r2(t.v0 || 0), devBuy: r2(t.devBuy), step: STEP_MS / 1000, snaps: t.snaps, path: t.path,
+  const rec = { id: t.m, sym: t.sym, t0: t.t0, vSol0: r2(t.v0 || 0), watch: t.watch.length ? t.watch : undefined, devBuy: r2(t.devBuy), step: STEP_MS / 1000, snaps: t.snaps, path: t.path,
     peak: r1(t.peak), peakAge: r1(t.peakAge || 0), devSoldAt: t.devSoldAt, final: feats(t), trade: t.trade || null };
   tokenBuf.push({ day: new Date(t.t0).toISOString().slice(0, 10), line: JSON.stringify(rec) });
   S.logSaved++; save();
@@ -202,7 +218,7 @@ function newTok(m, sym, creator, p, mcap, vSol, vTok, t0, devBuy) {
   return { m, sym, t0, creator, p0: p, p, vSol, vTok, v0: vSol, feePct: null, mcap, peak: mcap, peakAge: 0, buyers: new Set(), sellers: new Set(), buyBy: new Map(),
     recent: [], buyVol: 0, sellVol: 0, nTrades: 0, nBuys: 0, nSells: 0, devSold: false, devSoldAt: null, devBuy: devBuy || 0,
     last: Date.now(), path: [], snaps: [], snapIdx: 0, traded: false, pendingBuy: false, trade: null,
-    m0: mcap, slot0: null, snipers: new Set(), sniperVol: 0, early: new Set(), devN: 0, devRugs: 0, regDone: false };
+    watch: [], m0: mcap, slot0: null, snipers: new Set(), sniperVol: 0, early: new Set(), devN: 0, devRugs: 0, regDone: false };
 }
 
 function connectSolana() {
@@ -269,6 +285,12 @@ function handle(d) {
   if (t.mcap > t.peak) { t.peak = t.mcap; t.peakAge = (now - t.t0) / 1000; }
   t.last = now; t.nTrades++;
   const sol = d.solAmount || 0, who = d.traderPublicKey;
+  const wl = (d.txType === 'buy' || d.txType === 'sell') ? WATCH.get(who) : null;
+  if (wl) {
+    const age = r1((now - t.t0) / 1000);
+    t.watch.push({ w: wl, side: d.txType, age, sol: r2(sol), mcap: r1(t.mcap) });
+    log(`WATCH ${wl} ${d.txType === 'buy' ? 'koopt' : 'verkoopt'} ${t.sym} ${sol.toFixed(2)} SOL (token ${age}s oud, mcap ${t.mcap.toFixed(1)})`);
+  }
   if (d.txType === 'buy' || d.txType === 'sell') { lastTradeAt = now; nFeedTrades++; tradeTimes.push(now); }
   if (d.txType === 'buy' && who === t.creator && now - t.t0 < 3000) {
     t.devBuy += sol; // eerste koop van de maker in dezelfde transactie: geen onafhankelijke koper
@@ -308,6 +330,7 @@ function evaluate(t) {
   if (c.maxSniperShare < 100) { const sh = t.buyVol ? t.sniperVol / t.buyVol * 100 : 0; checks.push({ k: 'snipe', label: 'SNIPERS', ok: sh <= c.maxSniperShare, disp: `${sh.toFixed(0)}%`, need: `≤${c.maxSniperShare}%` }); }
   if (c.minOrganic > 0) { const og = t.buyers.size - t.snipers.size; checks.push({ k: 'organic', label: 'ORGANISCH', ok: og >= c.minOrganic, disp: `${og}`, need: `≥${c.minOrganic}` }); }
   if (c.maxDevRugs < 99) checks.push({ k: 'devhist', label: 'MAKER', ok: t.devRugs <= c.maxDevRugs, disp: `${t.devRugs}/${t.devN}`, need: `rugs ≤${c.maxDevRugs}` });
+  if (c.minWatched > 0) { const n = new Set(t.watch.filter(x => x.side === 'buy').map(x => x.w)).size; checks.push({ k: 'watched', label: 'WATCH', ok: n >= c.minWatched, disp: `${n}`, need: `≥${c.minWatched}` }); }
   if (c.minSmart > 0) { let n = 0; for (const b of t.buyers) if (isSmart(b)) n++; checks.push({ k: 'smart', label: 'SLIM', ok: n >= c.minSmart, disp: `${n}`, need: `≥${c.minSmart}` }); }
   return { age, checks, dead: age > c.maxAge || t.devSold };
 }
@@ -535,4 +558,4 @@ function start() {
 }
 
 if (require.main === module) start();
-module.exports = { server, handle, tick, REG, registryUpdate, saveRegistry, loadRegistry, isSmart, evaluate, close, checkEntry, finalize, flushData, getS: () => S, T, DEF, DATA_DIR };
+module.exports = { WATCH, server, handle, tick, REG, registryUpdate, saveRegistry, loadRegistry, isSmart, evaluate, close, checkEntry, finalize, flushData, getS: () => S, T, DEF, DATA_DIR };

@@ -131,6 +131,16 @@ Het zegt ook hoeveel combinaties het geprobeerd heeft en wat de gemiddelde combi
 dan is er in die data geen aangetoonde edge en levert aan TP/SL draaien alleen toeval op. De snapshots lopen nu tot 300 s; zet voor langere strategieën
 "LOG HORIZON S" op bv. 480 (meer geheugen, max 600 gevolgde tokens).
 
+## Wallets volgen (watchlist)
+
+Zet in `.env`: `WATCH_WALLETS=jaap=<adres>,<adres2>` (optioneel met naam). De bot legt dan vast wanneer zo'n wallet een gevolgd token koopt of verkoopt
+(leeftijd van het token, bedrag, mcap) in het datasetrecord en in het log (`WATCH jaap koopt …`). Kenmerk `watched` zit in de snapshots en er is een optioneel
+filter "MIN GEVOLGDE WALLETS" (standaard uit). Het is alleen lezen/loggen: er wordt niets gekocht omdat zij kopen. `npm run analyze` toont onderaan per wallet
+wat copy-trading had opgeleverd (instap bij hun eerste koop per token, met vertraging en alle kosten); onder n = 30 is dat nog geen conclusie.
+
+Beperking: de bot ziet alleen tokens die hij zelf heeft zien ontstaan (sinds zijn start) en volgt ze `LOG HORIZON S` seconden (standaard 180). Koopt een wallet oudere
+tokens, dan zie je dat niet. Zet de horizon dan hoger (bv. 480).
+
 ## Strategie
 
 - **Instap:** genoeg unieke kopers, koopvolume en koop/verkoop-ratio, mcap binnen een bereik, token niet al te ver gestegen, dev heeft niet verkocht.
